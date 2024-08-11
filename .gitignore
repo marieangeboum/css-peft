@@ -1,0 +1,9 @@
+wandb/
+*/__pycache__/
+checkpoints/
+.venv/
+.neptune/
+.ipynb_checkpoints/
+.idea/
+open_earth_map/
+segment-anything/
