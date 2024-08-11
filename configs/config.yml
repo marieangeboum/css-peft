@@ -1,0 +1,211 @@
+checkpoints: /scratcht/FLAIR_1/experiments/checkpoints/
+device : 'cuda'
+model_name : vit_base_patch16
+dataset:
+  cityscapes:
+    batch_size: 4
+    crop_size: 768
+    epochs: 216
+    eval_freq: 25
+    im_size: 1024
+    learning_rate: 0.01
+    window_size: 768
+    window_stride: 512
+  flair1:
+    img_logs : /scratcht/FLAIR_1/experiments/predictions/vit_base_patch16_dino
+    batch_size: 8
+    threshold: 90
+    binary: false
+    epochs: 100
+    eval_freq: 8
+    im_size: 512
+    interpolation: true
+    learning_rate: 0.01
+    metadata: /scratcht/FLAIR_1/flair-one_classif_metadata.json
+    n_channels: 3
+    n_cls: 13
+    norm_task:
+      norm_means:
+      - 105.08
+      - 110.87
+      - 101.82
+      - 106.38
+      - 53.26
+      norm_stds:
+      - 52.17
+      - 45.38
+      - 44
+      - 39.69
+      - 79.3
+    seq_length: 25
+    window_size: 224
+    window_stride: 224
+    class_weights_13:
+      0: 8.23,
+      1: 8.07,
+      2: 13.98,
+      3: 3.65,
+      4: 5.10,
+      5: 2.67,
+      6: 15.08,
+      7: 6.94,
+      8: 3.28,
+      9: 18.72,
+      10: 10.16,
+      11: 3.55,
+      12: 0
+    class_weights_binary:
+      0:
+      - 91.77
+      - no building
+      1:
+      - 8.23
+      - building
+    classnames:
+      0: building
+      1: pervious surface
+      2: impervious surface
+      3: bare soil
+      4: water
+      5: coniferous
+      6: deciduous
+      7: brushwood
+      8: vineyard
+      9: herbaceous vegetation
+      10: agricultural land
+      11: plowed land
+      12: other
+    classnames_3:
+      0: building
+      1: pervious surface
+      2: impervious surface
+      4: other
+    classnames_binary:
+      0: no building
+      1: building
+    crop_size: 512
+    data_path: /scratcht/FLAIR_1/train/
+    task_name : 
+        - D074_2020
+        - D004_2021
+        - D086_2020
+        - D029_2021
+        - D034_2021
+        - D033_2021
+        - D066_2021
+        - D080_2021
+        - D016_2020
+        - D031_2019 
+        - D044_2020
+        - D009_2019
+        - D046_2019
+        - D049_2020
+        - D052_2019
+    domain_sequence:
+        - D072_2019
+        - D081_2020
+        - D021_2020
+        - D060_2021
+        - D008_2019
+        - D078_2021
+        - D041_2021
+        - D055_2018
+        - D063_2019
+decoder:
+  deeplab_dec:
+    encoder_layer: -1
+  linear: {}
+  mask_transformer:
+    drop_path_rate: 0.0
+    dropout: 0.1
+    n_layers: 2
+lora_parameters:
+  alpha: 32
+  rank: 32
+model:
+  vit_base_patch16_224:
+    d_model: 768
+    distilled: false
+    image_size: 224
+    n_heads: 12
+    n_layers: 12
+    normalisation: vit
+    patch_size: 16
+  vit_base_patch16_384:
+    d_model: 768
+    distilled: false
+    image_size: 384
+    n_heads: 12
+    n_layers: 12
+    normalization: vit
+    patch_size: 16
+  vit_base_patch32_224:
+    d_model: 768
+    image_size: 224
+    n_heads: 12
+    n_layers: 12
+    normalization: vit
+    patch_size: 32
+  vit_base_patch8_224:
+    d_model: 768
+    distilled: false
+    image_size: 224
+    n_heads: 12
+    n_layers: 12
+    normalization: vit
+    patch_size: 8
+  vit_large_patch16_384:
+    d_model: 1024
+    image_size: 384
+    n_heads: 16
+    n_layers: 24
+    normalization: vit
+    patch_size: 16
+  vit_large_patch14_224:
+    d_model: 1024
+    image_size: 384
+    n_heads: 16
+    n_layers: 24
+    normalization: vit
+    patch_size: 14
+  vit_large_patch32_384:
+    d_model: 1024
+    image_size: 384
+    n_heads: 16
+    n_layers: 24
+    normalization: vit
+    patch_size: 32
+  vit_small_patch16_384:
+    d_model: 384
+    distilled: false
+    image_size: 384
+    n_heads: 6
+    n_layers: 12
+    normalization: vit
+    patch_size: 16
+  vit_small_patch32_384:
+    d_model: 384
+    distilled: false
+    image_size: 384
+    n_heads: 6
+    n_layers: 12
+    normalization: vit
+    patch_size: 32
+  vit_tiny_patch16_384:
+    d_model: 192
+    distilled: false
+    image_size: 384
+    n_heads: 3
+    n_layers: 12
+    normalization: vit
+    patch_size: 16
+  vit_huge_patch16_1024:
+    d_model: 1280
+    distilled: false
+    image_size: 384
+    n_heads: 16
+    n_layers: 32
+    normalisation: vit
+    patch_size: 16
+seed: 4563
+train_type: finetuning
