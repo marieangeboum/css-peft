@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 import timm
 from collections import defaultdict
-
+from timm.models.layers import DropPath
 from timm.models.layers import trunc_normal_
 
 
@@ -183,9 +183,6 @@ def num_params(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     n_params = sum([torch.prod(torch.tensor(p.size())) for p in model_parameters])
     return n_params.item()
-
-from timm.models.layers import DropPath
-
 
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout, out_dim=None):

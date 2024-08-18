@@ -46,7 +46,8 @@ class VisionTransformerAdapt(nn.Module):
         dropout=0.1,
         drop_path_rate=0.0,
         distilled=False,
-        channels=3
+        channels=3,
+        task_id = 0
     ):
         super().__init__()
         self.tuning_config = tuning_config
@@ -63,6 +64,7 @@ class VisionTransformerAdapt(nn.Module):
         self.n_heads = n_heads
         self.dropout = nn.Dropout(dropout)
         self.n_cls = n_cls
+        self.task_id = task_id
 
         # cls and pos tokens
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
@@ -82,7 +84,8 @@ class VisionTransformerAdapt(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, n_layers)]
         self.blocks = nn.ModuleList(
             [Block(dim=d_model, num_heads=n_heads, mlp_ratio=4., qkv_bias=True,
-                   drop=0., attn_drop=0., drop_path=dpr[i], config=tuning_config, layer_id=i) for i in range(n_layers)]
+                   drop=0., attn_drop=0., drop_path=dpr[i], config=tuning_config, layer_id=i, 
+                   nb_task=self.tuning_config.nb_task, task_id=task_id) for i in range(n_layers)]
         )
 
         if tuning_config and tuning_config.vpt_on:

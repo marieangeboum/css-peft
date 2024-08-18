@@ -3,7 +3,29 @@ import torch.nn as nn
 from timm.models.layers import DropPath, trunc_normal_
 from .adapter import Adapter
 
+class Mlp(nn.Module):
+    def __init__(self, dim, mlp_hidden_dim, drop, out_dim=None):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, mlp_hidden_dim)
+        self.act = nn.GELU()
+        if out_dim is None:
+            out_dim = dim
 
+        self.fc2 = nn.Linear(mlp_hidden_dim, dim)
+        self.drop = nn.Dropout(drop)
+
+       
+    @property
+    def unwrapped(self):
+        return self
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
@@ -36,20 +58,20 @@ def resize_pos_embed(posemb, grid_old_shape, grid_new_shape, num_extra_tokens):
     return posemb
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,):
+    def __init__(self, dim, num_heads=8, dropout=0.,):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.head_dim = dim // num_heads
         self.scale = head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3)
+        # self.q_proj = nn.Linear(dim, dim, bias=qkv_bias)
+        # self.v_proj = nn.Linear(dim, dim, bias=qkv_bias)
+        # self.k_proj = nn.Linear(dim, dim, bias=qkv_bias)
 
-        self.q_proj = nn.Linear(dim, dim, bias=qkv_bias)
-        self.v_proj = nn.Linear(dim, dim, bias=qkv_bias)
-        self.k_proj = nn.Linear(dim, dim, bias=qkv_bias)
-
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop = nn.Dropout(dropout)
         self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.proj_drop = nn.Dropout(dropout)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -57,65 +79,70 @@ class Attention(nn.Module):
     def forward(self, x):
         B, N, C = x.shape
 
-        q = self.q_proj(x)
-        k = self._shape(self.k_proj(x), -1, B).view(B * self.num_heads, -1, self.head_dim)
-        v = self._shape(self.v_proj(x), -1, B).view(B * self.num_heads, -1, self.head_dim)
-        q = self._shape(q, N, B).view(B * self.num_heads, -1, self.head_dim)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = (
+            qkv[0],
+            qkv[1],
+            qkv[2],
+        )
 
-        # attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn_weights = torch.bmm(q, k.transpose(1, 2)) * self.scale
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
 
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-        attn_probs = self.attn_drop(attn_weights)
-        attn_output = torch.bmm(attn_probs, v)
-
-        attn_output = attn_output.view(B, self.num_heads, N, self.head_dim)
-        attn_output = attn_output.transpose(1, 2)
-        attn_output = attn_output.reshape(B, N, C)
-
-        x = self.proj(attn_output)
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
         x = self.proj_drop(x)
 
-        return x
+        return x, attn
 
 
 class Block(nn.Module):
 
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU(), norm_layer=nn.LayerNorm, config=None, layer_id=None):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., 
+                 attn_drop=0.,drop_path=0., act_layer=nn.GELU(), 
+                 norm_layer=nn.LayerNorm, config=None, layer_id=None, nb_task=None, task_id = 0):
         super().__init__()
         self.config = config
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.norm2 = norm_layer(dim)
+        self.attn = Attention(dim, num_heads=num_heads, dropout=drop)
+        
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
+        
         mlp_hidden_dim = int(dim * mlp_ratio)
-
-        self.fc1 = nn.Linear(dim, mlp_hidden_dim)
-        self.fc2 = nn.Linear(mlp_hidden_dim, dim)
-        self.act = nn.GELU()
-        self.mlp_drop = nn.Dropout(drop)
-
+        self.mlp = Mlp(dim, mlp_hidden_dim, drop)
+        
+        self.nb_task = nb_task
+        self.task_id = task_id
         if config.ffn_adapt:
-            self.adaptmlp = Adapter(self.config, dropout=0.1, bottleneck=config.ffn_num,
+            self.adaptmlp_pool = nn.ModuleList([Adapter(self.config, dropout=0.1, bottleneck=config.ffn_num,
                                     init_option=config.ffn_adapter_init_option,
                                     adapter_scalar=config.ffn_adapter_scalar,
                                     adapter_layernorm_option=config.ffn_adapter_layernorm_option,
-                                    )
+                                    ) for i in range(self.nb_task)])
 
-    def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+    def forward(self, x, mask = None, return_attention = False):
+        y,  attn = self.attn(self.norm1(x))
+        if return_attention:
+            return attn
+        
+        x = x + self.drop_path(y)
         if self.config.ffn_adapt and self.config.ffn_option == 'parallel':
-            adapt_x = self.adaptmlp(x, add_residual=False)
+            adapt_x = self.adaptmlp_pool[self.task_id](x, add_residual=False)
 
         residual = x
-        x = self.mlp_drop(self.act(self.fc1(self.norm2(x))))
-        x = self.drop_path(self.mlp_drop(self.fc2(x)))
+        
+        x = self.drop_path(self.mlp(self.norm2(x)))
 
         if self.config.ffn_adapt:
             if self.config.ffn_option == 'sequential':
-                x = self.adaptmlp(x)
+                x = self.adaptmlp_pool[self.task_id](x)
             elif self.config.ffn_option == 'parallel':
                 x = x + adapt_x
             else:

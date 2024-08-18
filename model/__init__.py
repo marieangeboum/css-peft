@@ -1,4 +1,3 @@
-from model.ops import *
 from model.vit import *
 from model.vit_image import *
 from model.utils import *

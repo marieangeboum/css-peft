@@ -1,18 +1,15 @@
-import torch
+import torch # type: ignore
 import copy
-import timm
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-
-
+import timm # type: ignore
+import torch.nn as nn # type: ignore
+import torch.nn.functional as F # type: ignore
 from model.decoder import *
 from model.utils import *
-from timm.models.layers import trunc_normal_
+from timm.models.layers import trunc_normal_ # type: ignore
 from peft_methods.lora import *
 import peft_methods.vit_image as vit_image
 from model.vit_image import VisionTransformerAdapt
+
 class SegmenterAdapt(nn.Module):
     def __init__(
         self,
@@ -31,6 +28,7 @@ class SegmenterAdapt(nn.Module):
         drop_path_rate=0.0,
         distilled=False,
         channels=3, 
+        id = 0
         
     ):
         super(SegmenterAdapt, self).__init__()
@@ -50,6 +48,7 @@ class SegmenterAdapt(nn.Module):
         self.drop_path_rate = 0.0
         self.distilled=False
         self.channels=3
+        self.id = id
 
         self.encoder = VisionTransformerAdapt(
                 image_size,
@@ -63,12 +62,13 @@ class SegmenterAdapt(nn.Module):
                 dropout=0.1,
                 drop_path_rate=0.0,
                 distilled=False,
-                channels=3
+                channels=3, 
+                task_id= self.id
             )
-        #    self.encoder = 
         # self.decoder = DecoderLinear(n_cls, patch_size, d_model)
-        self.decoder = MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
-                                       n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1)
+        self.decoder_pool = nn.ModuleList([MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
+                                       n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1) 
+                                       for i in range(self.tuning_config.nb_task)])
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -94,35 +94,43 @@ class SegmenterAdapt(nn.Module):
             else:
                 param.requires_grad = False
         return nwd_params
+    
+    def increment(self):
+        self.id += 1
 
     def forward(self, im):
         H_ori, W_ori = im.size(2), im.size(3)
         im = padding(im, self.patch_size)
         H, W = im.size(2), im.size(3)
-
         x = self.encoder(im)
-        # print(x)
-
         # remove CLS/DIST tokens for decoding
         num_extra_tokens = 1 + self.encoder.distilled
         x = x[:, num_extra_tokens:]
-
-        masks = self.decoder(x, (H, W))
-
+        masks = self.decoder_pool[self.id](x, (H, W))
         masks = F.interpolate(masks, size=(H, W), mode="bilinear")
         masks = unpadding(masks, (H_ori, W_ori))
 
         return masks
-    
-    def load_pretrained_weights(self):
-        try : 
-            timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
-            timm_vision_transformer.head = nn.Identity()
-            # modified_weights = StateDictModifier(timm_vision_transformer)
-            self.encoder.load_state_dict(timm_vision_transformer.state_dict(), False)
-            print("Pretrained model loaded successfully!")
+ 
+    def load_pretrained_weights(self, model_path=None):
+        """
+        Load pretrained weights into the SegmenterAdapt model.
+        
+        :param model_path: Path to the file containing the pre-trained weights. If None, loads default weights.
+        """
+        try:
+            if model_path:
+                # Load the weights from the specified path
+                checkpoint = torch.load(model_path, map_location="cpu")
+                self.load_state_dict(checkpoint['model'], strict=False)
+                print(f"Pretrained weights loaded successfully from {model_path}!")
+            else:
+                # Default behavior if no path is provided (e.g., loading timm model)
+                timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
+                timm_vision_transformer.head = nn.Identity()
+                self.encoder.load_state_dict(timm_vision_transformer.state_dict(), strict=False)
+                print("Pretrained model loaded successfully from timm!")
         except Exception as e:
-            # Handle any exceptions that occur during loading
             print("An error occurred while loading the pretrained model:", e)
 
     def load_pretrained_weights_sam(self):
@@ -148,19 +156,14 @@ class SegmenterAdapt(nn.Module):
             self.apply_enctuning()
         else : 
             print("No specific fine-tuning strategy applied.")
-            
-
-   
-            
+                    
     def get_attention_map_enc(self, im, layer_id):
         return self.encoder.get_attention_map(im, layer_id)
 
     def get_attention_map_dec(self, im, layer_id):
         x = self.encoder(im, return_features=True)
-
         # remove CLS/DIST tokens for decoding
         num_extra_tokens = 1 + self.encoder.distilled
         x = x[:, num_extra_tokens:]
-
         return self.decoder.get_attention_map(x, layer_id)
     

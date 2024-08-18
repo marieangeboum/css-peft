@@ -15,11 +15,11 @@ def main():
     api_token = "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwN2IzOGYxMC0xYTg5LTQxMGEtYjE3Yy1iNDVkZDM1MmEzYzIifQ=="
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     parser = ArgumentParser()
-    parser.add_argument("--initial_lr", type=float, default = 0.001)
+    parser.add_argument("--initial_lr", type=float, default = 0.01)
     parser.add_argument("--final_lr", type=float, default = 0.005)
     parser.add_argument("--lr_milestones", nargs=2, type=float, default=(20,80))
-    parser.add_argument("--epoch_len", type=int, default=100)
-    parser.add_argument("--sup_batch_size", type=int, default=4)
+    parser.add_argument("--epoch_len", type=int, default=10000)
+    parser.add_argument("--sup_batch_size", type=int, default=8)
     parser.add_argument("--crop_size", type=int, default=256)
     parser.add_argument("--workers", default=6, type=int)
     parser.add_argument('--img_aug', type=str, default='d4_rot90_rot270_rot180_d1flip')
@@ -50,18 +50,6 @@ def main():
     torch.autograd.set_detect_anomaly(True) 
     random.seed(seed)
 
-    # Learning rate
-    def lambda_lr(epoch):
-        m = epoch / args.max_epochs
-        if m < args.lr_milestones[0]:
-            return 1
-        elif m < args.lr_milestones[1]:
-            return 1 + ((m - args.lr_milestones[0]) / (
-                        args.lr_milestones[1] - args.lr_milestones[0])) * (
-                               args.final_lr / args.initial_lr - 1)
-        else:
-            return args.final_lr / args.initial_lr
-        
     train_type = args.train_type
     strategy = args.strategy.format(train_type)
     dataset = config["dataset"]
@@ -71,7 +59,7 @@ def main():
     metadata = data_config["metadata"]
     data_sequence = data_config["task_name"]
     n_class = data_config["n_cls"]
-    selected_model = "vit_small_patch16_224"
+    selected_model = "vit_base_patch16_224"
     model_type = config["model"]
     model_config = model_type[selected_model]
     im_size = model_config["image_size"]
@@ -90,7 +78,7 @@ def main():
         ffn_adapter_init_option="lora",
         ffn_adapter_scalar="0.1",
         ffn_num=args.ffn_num,
-        d_model=384,
+        d_model=768,
         # VPT related
         vpt_on=args.vpt,
         vpt_num=args.vpt_num,
@@ -129,7 +117,7 @@ def main():
         segmentation_model = SegmenterAdapt(im_size, n_layers, d_model, d_encoder, 4 * d_model, n_heads, n_class,
                                             patch_size, selected_model, tuning_config=tuning_config,
                                             model_name=config["model_name"], id = step).to(device)
-        segmentation_model.load_pretrained_weights()
+        segmentation_model.load_pretrained_weights_inference()
         for param in segmentation_model.encoder.parameters():
             param.requires_grad = False
         # Unfreeze the adapt_mlp layers
@@ -139,47 +127,3 @@ def main():
         num_params = sum(p.numel() for p in segmentation_model.parameters() if p.requires_grad)
         print(f"training strategy: {train_type}\n\n")
         print(f"trainable parameters: {num_params/2**20:.4f}M \n\n")
-        
-        # Class Weights
-        # class_weights, cumulative_weights = domain_class_weights(metadata,data_sequence, 
-        #                                                          binary=binary,binary_label = 0)
-        # weights_keys = list(class_weights[domain].keys())
-        # weights = list(class_weights[domain].values())
-        # missing_key = (n_class-1)*(n_class)//2 - sum(weights_keys)
-        # all_weights = np.array([1./(value/100) for value in weights])
-        # if len(all_weights) != n_class :
-        #     all_weights = np.insert(all_weights, missing_key, 0.)
-
-        # Callbacks
-        early_stopping = EarlyStopping(patience=20, verbose=True, 
-                                       delta=0.001,path=segmentation_model_path)
-        optimizer = SGD(segmentation_model.parameters(),
-                        lr=args.initial_lr,
-                        momentum=0.9)
-        scheduler = LambdaLR(optimizer,lr_lambda= lambda_lr, verbose = True)
-        #loss_fn = torch.nn.CrossEntropyLoss(weight = torch.tensor(all_weights).float()).cuda()
-        loss_fn = torch.nn.CrossEntropyLoss().cuda()
-        accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
-
-        for epoch in range(1,args.max_epochs):
-            time_ep = time.time()
-            segmentation_model, train_acc, train_loss = train_function(segmentation_model,train_loader, 
-                                                device,optimizer, loss_fn,
-                                                accuracy,epoch, data_config, run)
-            print(train_acc, train_loss)
-            scheduler.step()
-            segmentation_model, val_loss, val_acc = validation_function(segmentation_model,val_loader, 
-                                                               device,loss_fn,
-                                                               accuracy, epoch, data_config, run)
-            
-            print(val_acc, val_loss)
-            early_stopping(val_loss,segmentation_model)
-            if early_stopping.early_stop:
-                break
-            time_ep = time.time() - time_ep
-        segmentation_model.increment()
-        # segmentation_model,val_metrics = test_function(segmentation_model,test_dataloader, device, accuracy,
-        #                                      eval_freq, data_config, "SUP", "0")
-    run.stop()
-if __name__ == "__main__":
-    main()
