@@ -3,7 +3,6 @@ import glob
 # import tqdm
 import torch
 import neptune
-from neptune.types import File
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -14,7 +13,7 @@ import random
 import logging
 import tabulate
 
-
+from neptune.types import File # type: ignore
 from tqdm import tqdm
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
@@ -84,8 +83,7 @@ def create_train_dataloader(domain_img_train, args,data_config, binary, label_bi
     # Train dataset
     train_datasets = []
     for img_path in domain_img_train : 
-        img_path_strings = img_path.split('/')
-
+        img_path_strings = img_path.split('\\')
         domain_pattern = img_path_strings[-4]
         img_pattern = img_path_strings[-1].split('_')[-1].strip('.tif')
         lbl_path = glob.glob(os.path.join(data_path, '{}/Z*_*/msk/MSK_{}.tif'.format(domain_pattern, img_pattern)))[0]
@@ -170,7 +168,7 @@ def create_test_dataloader(domain_img_test,  args,data_config, binary, label_bin
         num_workers=n_workers)
     return test_dataloader
 
-def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, data_config, run ):
+def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, epoch, data_config, run ):
     n_channels = data_config['n_channels']
     interpolation = data_config["interpolation"]
     class_labels = data_config["classnames"]
@@ -193,13 +191,13 @@ def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, 
         loss_sum += loss.item()
     train_loss = loss_sum / len(train_dataloader)
     train_acc = acc_sum/len(train_dataloader)
-    run["train/accuracy"].append(train_acc)
-    run["train/loss"].append(train_loss)
+    run["train/accuracy"].append(train_acc, step=epoch)
+    run["train/loss"].append(train_loss, step=epoch)
 
-    return model
+    return model, train_acc, train_loss
 
 
-def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=20):
+def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=2):
     n_channels = data_config['n_channels']
     interpolation = data_config["interpolation"]
     img_logs = data_config["img_logs"]
@@ -213,8 +211,8 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
     for i, batch in tqdm(enumerate(val_dataloader), total=len(val_dataloader)):
         # Preprocess input and target
         image = (batch['image'][:, :n_channels, :, :] / 255.).to(device)
-        target = batch['mask'].to(device) if interpolation else batch['mask'].to(device)
-
+        target = batch['mask'].to(device)
+        
         # Model forward pass
         output = model(image)
         softmax_output = F.softmax(output, dim=1)
@@ -242,8 +240,8 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                 domain_id = batch['id'][img]
                 # Compute metrics for specific images
                 img_cm = compute_conf_mat(
-                    target[img].view(-1).cpu(),
-                    output.argmax(dim=1)[img].view(-1).cpu().long(),
+                    target[img].contiguous().view(-1).cpu(),
+                    output.argmax(dim=1)[img].contiguous().view(-1).cpu().long(),
                     n_class
                 )
                 img_metrics_per_class_df, _, _ = dl_inf.cm2metrics(img_cm.numpy())
@@ -269,11 +267,11 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                            bbox_to_anchor=(0.5, 0.11), fontsize='small')
 
                 # Log figure to Neptune
-                run[f'images/epoch_{epoch}/batch_{i}/domain_{domain_id}'] = fig
+                run[f'images/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
 
                 # Log IoU metrics for this image to Neptune
                 for cls_idx, cls_name in class_labels.items():
-                    run[f'validation/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx])
+                    run[f'validation/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx], step=epoch)
 
     # Overall metrics and logging
     if epoch % eval_freq == 0:
@@ -291,7 +289,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                     ax=axs[1])
         axs[1].set_title('Confusion Matrix: Recall')
         # Log confusion matrix to Neptune
-        run[f'validation/epoch_{epoch}/confusion_matrix'] = fig
+        run[f'validation/epoch_{epoch}/confusion_matrix'].upload(fig)
         # Log overall metrics to Neptune
         run[f'validation/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df))
         run[f'validation/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df))
@@ -299,10 +297,10 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
     val_loss = loss_sum / len(val_dataloader)
     val_acc = acc_sum / len(val_dataloader)
     # Log final metrics to Neptune
-    run["val/accuracy"].append(val_acc)
-    run["val/loss"].append(val_loss)
-    run["val/iou"].append(torch.mean(iou_metrics))
-    return model, val_loss
+    run["val/accuracy"].append(val_acc, step=epoch)
+    run["val/loss"].append(val_loss, step=epoch)
+    run["val/iou"].append(torch.mean(iou_metrics), step=epoch)
+    return model, val_loss, val_acc
 
 
 def test_function(model,test_dataloader, device, accuracy , eval_freq, data_config, domain, step):
