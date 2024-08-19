@@ -51,6 +51,7 @@ class VisionTransformerAdapt(nn.Module):
     ):
         super().__init__()
         self.tuning_config = tuning_config
+        
         self.patch_embed = PatchEmbedding(
             image_size,
             patch_size,

@@ -1,6 +1,6 @@
 checkpoints: /scratcht/FLAIR_1/experiments/checkpoints/
 device : 'cuda'
-model_name : vit_base_patch16
+model_name : vit_large_patch14
 dataset:
   cityscapes:
     batch_size: 4
@@ -12,7 +12,7 @@ dataset:
     window_size: 768
     window_stride: 512
   flair1:
-    img_logs : /scratcht/FLAIR_1/experiments/predictions/vit_base_patch16_dino
+    img_logs : /scratcht/FLAIR_1/experiments/predictions/vit_base_patch8_dino
     batch_size: 8
     threshold: 90
     binary: false
@@ -154,27 +154,13 @@ model:
     n_layers: 12
     normalization: vit
     patch_size: 8
-  vit_large_patch16_384:
-    d_model: 1024
-    image_size: 384
-    n_heads: 16
-    n_layers: 24
-    normalization: vit
-    patch_size: 16
   vit_large_patch14_224:
     d_model: 1024
-    image_size: 384
+    image_size: 224
     n_heads: 16
     n_layers: 24
     normalization: vit
     patch_size: 14
-  vit_large_patch32_384:
-    d_model: 1024
-    image_size: 384
-    n_heads: 16
-    n_layers: 24
-    normalization: vit
-    patch_size: 32
   vit_small_patch16_384:
     d_model: 384
     distilled: false

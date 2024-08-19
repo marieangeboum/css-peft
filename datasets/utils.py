@@ -2,20 +2,12 @@ import os
 import glob
 # import tqdm
 import torch
-import neptune
 import numpy as np
-import pandas as pd
 import seaborn as sns
-
-import time as t
-import fnmatch
-import random
-import logging
-import tabulate
 
 from neptune.types import File # type: ignore
 from tqdm import tqdm
-from torchvision import datasets, transforms
+from torchvision import transforms
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import dl_toolbox.inference as dl_inf
@@ -83,7 +75,8 @@ def create_train_dataloader(domain_img_train, args,data_config, binary, label_bi
     # Train dataset
     train_datasets = []
     for img_path in domain_img_train : 
-        img_path_strings = img_path.split('\\')
+        img_path_strings = img_path.split('/')
+        
         domain_pattern = img_path_strings[-4]
         img_pattern = img_path_strings[-1].split('_')[-1].strip('.tif')
         lbl_path = glob.glob(os.path.join(data_path, '{}/Z*_*/msk/MSK_{}.tif'.format(domain_pattern, img_pattern)))[0]
@@ -197,7 +190,7 @@ def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, 
     return model, train_acc, train_loss
 
 
-def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=2):
+def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=10):
     n_channels = data_config['n_channels']
     interpolation = data_config["interpolation"]
     img_logs = data_config["img_logs"]
@@ -295,7 +288,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
         run[f'validation/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df))
         run[f'validation/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df))
     val_loss = loss_sum / len(val_dataloader)
-    val_acc = acc_sum / len(val_dataloader)
+    val_acc = acc_sum.item() / len(val_dataloader)
     # Log final metrics to Neptune
     run["val/accuracy"].append(val_acc, step=epoch)
     run["val/loss"].append(val_loss, step=epoch)
@@ -340,15 +333,15 @@ def test_function(model,test_dataloader, device, accuracy , eval_freq, data_conf
                     output.argmax(dim = 1).contiguous().view(-1).cpu(), n_class)
             acc_sum += acc
             confusion_matrices.append(cm.numpy())
-            wandb_image_test.append(
-                wandb.Image(image[0,:,:,:].permute(1, 2, 0).cpu().numpy(), 
-                masks={"prediction" :
-                {"mask_data" : F.softmax(output, dim=1).argmax(dim=1)[0,:,:].cpu().numpy(), "class_labels" : class_labels},
-                "ground truth" : 
-                {"mask_data" : target_view[0,0,:,:].cpu().numpy(), "class_labels" : class_labels}}, 
-                caption= "batch_{}_domain_{}".format(i, batch['id'][0])))
-            if i % 200 == 0 :
-                wandb.log({f"(Inf) Predictions {step} {domain}": wandb_image_test})
+            # wandb_image_test.append(
+            #     wandb.Image(image[0,:,:,:].permute(1, 2, 0).cpu().numpy(), 
+            #     masks={"prediction" :
+            #     {"mask_data" : F.softmax(output, dim=1).argmax(dim=1)[0,:,:].cpu().numpy(), "class_labels" : class_labels},
+            #     "ground truth" : 
+            #     {"mask_data" : target_view[0,0,:,:].cpu().numpy(), "class_labels" : class_labels}}, 
+            #     caption= "batch_{}_domain_{}".format(i, batch['id'][0])))
+            # if i % 200 == 0 :
+            #     wandb.log({f"(Inf) Predictions {step} {domain}": wandb_image_test})
         confusion_mats = sum(confusion_matrices)
         metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
         fig = plt.figure(figsize=(20, 10))
@@ -362,10 +355,10 @@ def test_function(model,test_dataloader, device, accuracy , eval_freq, data_conf
                     xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), 
                     cmap = sns.cubehelix_palette(as_cmap=True))
         ax2.set_title('Confusion Matrix : Recall')
-        wandb.log({f"Confusion Matrix (Inference) {step} {domain}":wandb.Image(fig)})
-        wandb.log({f'Metrics Class (Inference) {step} {domain}': wandb.Table(dataframe= metrics_per_class_df)})
-        wandb.log({f'Macro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= macro_average_metrics_df)})
-        wandb.log({f'Micro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= micro_average_metrics_df)})
-        test_acc = {'acc': acc_sum/ len(test_dataloader)}
-        wandb.log(test_acc)
+        # wandb.log({f"Confusion Matrix (Inference) {step} {domain}":wandb.Image(fig)})
+        # wandb.log({f'Metrics Class (Inference) {step} {domain}': wandb.Table(dataframe= metrics_per_class_df)})
+        # wandb.log({f'Macro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= macro_average_metrics_df)})
+        # wandb.log({f'Micro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= micro_average_metrics_df)})
+        # test_acc = {'acc': acc_sum/ len(test_dataloader)}
+        # wandb.log(test_acc)
     return test_acc

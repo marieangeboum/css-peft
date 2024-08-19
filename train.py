@@ -18,8 +18,8 @@ def main():
     parser.add_argument("--initial_lr", type=float, default = 0.001)
     parser.add_argument("--final_lr", type=float, default = 0.005)
     parser.add_argument("--lr_milestones", nargs=2, type=float, default=(20,80))
-    parser.add_argument("--epoch_len", type=int, default=100)
-    parser.add_argument("--sup_batch_size", type=int, default=4)
+    parser.add_argument("--epoch_len", type=int, default=10000)
+    parser.add_argument("--sup_batch_size", type=int, default=8)
     parser.add_argument("--crop_size", type=int, default=256)
     parser.add_argument("--workers", default=6, type=int)
     parser.add_argument('--img_aug', type=str, default='d4_rot90_rot270_rot180_d1flip')
@@ -31,7 +31,7 @@ def main():
     parser.add_argument("--train_type", type = str, default="adaptmlp" )
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
-                        default = "/d/maboum/JSTARS/segmentation/configs/config.yml")
+                        default = "/d/maboum/css-peft/configs/config.yml")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
     parser.add_argument('--vpt', default=False, action='store_true', help='whether activate VPT')
@@ -71,10 +71,11 @@ def main():
     metadata = data_config["metadata"]
     data_sequence = data_config["task_name"]
     n_class = data_config["n_cls"]
-    selected_model = "vit_small_patch16_224"
+    selected_model = "vit_large_patch14_224"
     model_type = config["model"]
     model_config = model_type[selected_model]
     im_size = model_config["image_size"]
+    
     patch_size = model_config["patch_size"]
     d_model = model_config["d_model"]
     n_heads = model_config["n_heads"]
@@ -90,22 +91,21 @@ def main():
         ffn_adapter_init_option="lora",
         ffn_adapter_scalar="0.1",
         ffn_num=args.ffn_num,
-        d_model=384,
+        d_model=1024,
         # VPT related
         vpt_on=args.vpt,
         vpt_num=args.vpt_num,
         nb_task = len(data_sequence)) 
     
-    run = neptune.init_run(
-        project="continual-semantic-segmentation/peft-methods",
-        api_token=api_token,
-        name="AdaptFormerSeg",
-        description="First run for Adapters project",
-        tags=["adaptmlp", "test", "segmenter", "vit-large"])
-    
     train_imgs, test_imgs = [],[]
     test_dataloaders = []
     for step,domain in enumerate(data_sequence[:5]):
+        run = neptune.init_run(
+                project="continual-semantic-segmentation/peft-methods",
+                api_token=api_token,
+                name=f"AdaptFormerSeg{step}",
+                description="First run for Adapters project",
+                tags=["adaptmlp", "test", "segmenter", "vit-large"])
 
         img = glob.glob(os.path.join(directory_path, '{}/Z*_*/img/IMG_*.tif'.format(domain)))
         random.shuffle(img)
@@ -140,15 +140,15 @@ def main():
         print(f"training strategy: {train_type}\n\n")
         print(f"trainable parameters: {num_params/2**20:.4f}M \n\n")
         
-        # Class Weights
-        # class_weights, cumulative_weights = domain_class_weights(metadata,data_sequence, 
-        #                                                          binary=binary,binary_label = 0)
-        # weights_keys = list(class_weights[domain].keys())
-        # weights = list(class_weights[domain].values())
-        # missing_key = (n_class-1)*(n_class)//2 - sum(weights_keys)
-        # all_weights = np.array([1./(value/100) for value in weights])
-        # if len(all_weights) != n_class :
-        #     all_weights = np.insert(all_weights, missing_key, 0.)
+        #Class Weights
+        class_weights, cumulative_weights = domain_class_weights(metadata,data_sequence, 
+                                                                 binary=binary,binary_label = 0)
+        weights_keys = list(class_weights[domain].keys())
+        weights = list(class_weights[domain].values())
+        missing_key = (n_class-1)*(n_class)//2 - sum(weights_keys)
+        all_weights = np.array([1./(value/100) for value in weights])
+        if len(all_weights) != n_class :
+            all_weights = np.insert(all_weights, missing_key, 0.)
 
         # Callbacks
         early_stopping = EarlyStopping(patience=20, verbose=True, 
@@ -157,8 +157,8 @@ def main():
                         lr=args.initial_lr,
                         momentum=0.9)
         scheduler = LambdaLR(optimizer,lr_lambda= lambda_lr, verbose = True)
-        #loss_fn = torch.nn.CrossEntropyLoss(weight = torch.tensor(all_weights).float()).cuda()
-        loss_fn = torch.nn.CrossEntropyLoss().cuda()
+        loss_fn = torch.nn.CrossEntropyLoss(weight = torch.tensor(all_weights).float()).cuda()
+        #loss_fn = torch.nn.CrossEntropyLoss().cuda()
         accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
 
         for epoch in range(1,args.max_epochs):
@@ -180,6 +180,6 @@ def main():
         segmentation_model.increment()
         # segmentation_model,val_metrics = test_function(segmentation_model,test_dataloader, device, accuracy,
         #                                      eval_freq, data_config, "SUP", "0")
-    run.stop()
+        run.stop()
 if __name__ == "__main__":
     main()
