@@ -11,6 +11,21 @@ from torch.optim.lr_scheduler import LambdaLR # type: ignore
 from model.segmenter_adapt import SegmenterAdapt
 from dl_toolbox.callbacks import EarlyStopping # type: ignore
 
+
+def save_checkpoint(state, filename="checkpoint.pth.tar"):
+    """Save the training state (model, optimizer, etc.)."""
+    torch.save(state, filename)
+
+def load_checkpoint(filename="checkpoint.pth.tar"):
+    """Load the training state (model, optimizer, etc.)."""
+    if os.path.isfile(filename):
+        print(f"=> Loading checkpoint '{filename}'")
+        checkpoint = torch.load(filename)
+        return checkpoint
+    else:
+        print(f"=> No checkpoint found at '{filename}'")
+        return None
+
 def main(): 
     api_token = "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwN2IzOGYxMC0xYTg5LTQxMGEtYjE3Yy1iNDVkZDM1MmEzYzIifQ=="
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,6 +47,8 @@ def main():
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint.pth", 
+                        help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
     parser.add_argument('--vpt', default=False, action='store_true', help='whether activate VPT')
@@ -95,11 +112,12 @@ def main():
         # VPT related
         vpt_on=args.vpt,
         vpt_num=args.vpt_num,
-        nb_task = len(data_sequence)) 
+        nb_task = len(data_sequence[:5]),
+        tasks = data_sequence[:5]) 
     
     train_imgs, test_imgs = [],[]
     test_dataloaders = []
-    for step,domain in enumerate(data_sequence[:5]):
+    for step,domain in enumerate(tuning_config.tasks):
         run = neptune.init_run(
                 project="continual-semantic-segmentation/peft-methods",
                 api_token=api_token,
@@ -161,7 +179,19 @@ def main():
         #loss_fn = torch.nn.CrossEntropyLoss().cuda()
         accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
 
-        for epoch in range(1,args.max_epochs):
+        # Check if a checkpoint exists and load it
+        checkpoint = load_checkpoint(args.checkpoint_file)
+
+        if checkpoint:
+            start_epoch = checkpoint['epoch']
+            segmentation_model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            early_stopping.load_state(checkpoint['early_stopping_state_dict'])
+        else:
+            start_epoch = 1
+
+        for epoch in range(start_epoch,args.max_epochs):
             time_ep = time.time()
             segmentation_model, train_acc, train_loss = train_function(segmentation_model,train_loader, 
                                                 device,optimizer, loss_fn,
@@ -173,6 +203,18 @@ def main():
                                                                accuracy, epoch, data_config, run)
             
             print(val_acc, val_loss)
+            save_checkpoint({
+                'epoch': epoch,
+                'model_state_dict': segmentation_model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'early_stopping_state_dict': early_stopping.save_state(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'train_acc': train_acc,
+                'val_acc': val_acc,
+            }, filename=args.checkpoint_file)
+
             early_stopping(val_loss,segmentation_model)
             if early_stopping.early_stop:
                 break
