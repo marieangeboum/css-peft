@@ -115,9 +115,10 @@ def main():
         nb_task = len(data_sequence[:5]),
         tasks = data_sequence[:5]) 
     
-    train_imgs, test_imgs = [],[]
-    test_dataloaders = []
+    
     for step,domain in enumerate(tuning_config.tasks):
+        train_imgs, test_imgs = [],[]
+        test_dataloaders = []
         run = neptune.init_run(
                 project="continual-semantic-segmentation/peft-methods",
                 api_token=api_token,
