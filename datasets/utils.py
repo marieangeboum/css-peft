@@ -228,7 +228,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
         iou_metrics += torch.tensor(metrics_per_class_df.IoU.values)
 
         # Evaluate and log images at specific intervals
-        if epoch % eval_freq == 0 and i % 100 == 0:
+        if epoch % eval_freq == 0 and i % 10 == 0:
             for img in idx_list:
                 domain_id = batch['id'][img]
                 # Compute metrics for specific images
@@ -260,40 +260,41 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                            bbox_to_anchor=(0.5, 0.11), fontsize='small')
 
                 # Log figure to Neptune
-                run[f'images/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
+                run[f'val/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
 
                 # Log IoU metrics for this image to Neptune
                 for cls_idx, cls_name in class_labels.items():
-                    run[f'validation/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx], step=epoch)
+                    run[f'val/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2), step=epoch)
 
-    # Overall metrics and logging
-    if epoch % eval_freq == 0:
-        confusion_mats = sum(confusion_matrices)
-        metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
+        # Overall metrics and logging
+        if epoch % eval_freq == 0:
+            confusion_mats = sum(confusion_matrices)
+            metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
 
-        # Confusion matrix visualization
-        fig, axs = plt.subplots(1, 2, figsize=(20, 10))
-        sns.heatmap(confusion_mats / confusion_mats.sum(axis=0), annot=True, fmt='.2f',
-                    xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="crest",
-                    ax=axs[0])
-        axs[0].set_title('Confusion Matrix: Precision')
-        sns.heatmap(confusion_mats / confusion_mats.sum(axis=1), annot=True, fmt='.2f',
-                    xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="cubehelix",
-                    ax=axs[1])
-        axs[1].set_title('Confusion Matrix: Recall')
-        # Log confusion matrix to Neptune
-        run[f'validation/epoch_{epoch}/confusion_matrix'].upload(fig)
-        # Log overall metrics to Neptune
-        run[f'validation/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df))
-        run[f'validation/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df))
-        run[f'validation/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df))
+            # Confusion matrix visualization
+            fig, axs = plt.subplots(1, 2, figsize=(20, 10))
+            sns.heatmap(confusion_mats / confusion_mats.sum(axis=0), annot=True, fmt='.2f',
+                        xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="crest",
+                        ax=axs[0])
+            axs[0].set_title('Confusion Matrix: Precision')
+            sns.heatmap(confusion_mats / confusion_mats.sum(axis=1), annot=True, fmt='.2f',
+                        xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="cubehelix",
+                        ax=axs[1])
+            axs[1].set_title('Confusion Matrix: Recall')
+            # Log confusion matrix to Neptune
+            run[f'val/epoch_{epoch}/confusion_matrix'].upload(fig)
+            # Log overall metrics to Neptune
+            run[f'val/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
+            run[f'val/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
+            run[f'val/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
     val_loss = loss_sum / len(val_dataloader)
     val_acc = acc_sum.item() / len(val_dataloader)
+    val_iou = torch.mean(iou_metrics)/len(val_dataloader)
     # Log final metrics to Neptune
     run["val/accuracy"].append(val_acc, step=epoch)
     run["val/loss"].append(val_loss, step=epoch)
-    run["val/iou"].append(torch.mean(iou_metrics), step=epoch)
-    return model, val_loss, val_acc
+    run["val/iou"].append(val_iou, step=epoch)
+    return model, val_loss, val_acc, val_iou
 
 
 def test_function(model,test_dataloader, device, accuracy , eval_freq, data_config, domain, step):
@@ -362,3 +363,4 @@ def test_function(model,test_dataloader, device, accuracy , eval_freq, data_conf
         # test_acc = {'acc': acc_sum/ len(test_dataloader)}
         # wandb.log(test_acc)
     return test_acc
+          

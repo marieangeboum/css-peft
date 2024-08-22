@@ -38,16 +38,16 @@ def main():
     parser.add_argument("--crop_size", type=int, default=256)
     parser.add_argument("--workers", default=6, type=int)
     parser.add_argument('--img_aug', type=str, default='d4_rot90_rot270_rot180_d1flip')
-    parser.add_argument('--max_epochs', type=int, default=200)   
+    parser.add_argument('--max_epochs', type=int, default=150)   
     parser.add_argument('--sequence_path', type = str, default = "")
     parser.add_argument('--train_split_coef', type = float, default = 0.85)
     parser.add_argument('--strategy', type = str, default = 'continual_{}')
     parser.add_argument("--commit", type = str )
-    parser.add_argument("--train_type", type = str, default="adaptmlp" )
+    parser.add_argument("--train_type", type = str, default="adaptmlp")
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
-    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint.pth", 
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint.pth",
                         help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
@@ -88,7 +88,7 @@ def main():
     metadata = data_config["metadata"]
     data_sequence = data_config["task_name"]
     n_class = data_config["n_cls"]
-    selected_model = "vit_large_patch14_224"
+    selected_model = "vit_base_patch8_224"
     model_type = config["model"]
     model_config = model_type[selected_model]
     im_size = model_config["image_size"]
@@ -108,7 +108,7 @@ def main():
         ffn_adapter_init_option="lora",
         ffn_adapter_scalar="0.1",
         ffn_num=args.ffn_num,
-        d_model=1024,
+        d_model=d_model,
         # VPT related
         vpt_on=args.vpt,
         vpt_num=args.vpt_num,
@@ -123,7 +123,7 @@ def main():
                 api_token=api_token,
                 name=f"AdaptFormerSeg{step}",
                 description="First run for Adapters project",
-                tags=["adaptmlp", "test", "segmenter", "vit-large"])
+                tags=["adaptmlp", "test", "segmenter", "vit-base", "patch8"])
 
         img = glob.glob(os.path.join(directory_path, '{}/Z*_*/img/IMG_*.tif'.format(domain)))
         random.shuffle(img)
@@ -198,7 +198,7 @@ def main():
                                                 accuracy,epoch, data_config, run)
             print(train_acc, train_loss)
             scheduler.step()
-            segmentation_model, val_loss, val_acc = validation_function(segmentation_model,val_loader, 
+            segmentation_model, val_loss, val_acc, val_iou = validation_function(segmentation_model,val_loader, 
                                                                device,loss_fn,
                                                                accuracy, epoch, data_config, run)
             
@@ -213,6 +213,7 @@ def main():
                 'val_loss': val_loss,
                 'train_acc': train_acc,
                 'val_acc': val_acc,
+                'val_iou': val_iou
             }, filename=args.checkpoint_file)
 
             early_stopping(val_loss,segmentation_model)

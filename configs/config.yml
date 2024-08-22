@@ -1,6 +1,6 @@
 checkpoints: /scratcht/FLAIR_1/experiments/checkpoints/
 device : 'cuda'
-model_name : vit_large_patch14
+model_name : vit_base_patch8
 dataset:
   cityscapes:
     batch_size: 4

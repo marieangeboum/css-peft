@@ -38,7 +38,6 @@ def downsample_image(image, scale):
 
 
 class FlairDs(Dataset):
-
     def __init__(self,image_path,tile,fixed_crops, crop_size,crop_step, img_aug,
                  label_path=None,binary = False,label_binary = None, interpolation =False, *args,**kwargs):
 
@@ -58,8 +57,6 @@ class FlairDs(Dataset):
         self.binary = binary
         self.label_binary = label_binary
         self.interpolation = interpolation
-
-
     def read_label(self, label_path, window):
         pass
 
@@ -74,19 +71,13 @@ class FlairDs(Dataset):
         ''' Given index idx this function loads a sample  from the dataset based on index.
             It identifies image'location on disk, converts it to a tensor
         '''
-
         if self.crop_windows:# if self.windows is initialized correctly begin iteration on said list
             window = self.crop_windows[idx]
-
         else: # otherwise use Winodw method from rasterio module to initilize a window of size cx and cy
             cx = self.tile.col_off + np.random.randint(0, self.tile.width - self.crop_size + 1) # why add those randint ?
             cy = self.tile.row_off + np.random.randint(0, self.tile.height - self.crop_size + 1)
             window = Window(cx, cy, self.crop_size, self.crop_size)
-
-        #image = self.read_image(image_path=self.image_path,window=window)  # class inheritance
-
         ## Not here --> # vizualise the window crops extracted from the input image
-
         with rasterio.open(self.image_path, 'r') as image_file:
             image_rasterio = image_file.read(window=window, out_dtype=np.float32) # read the cropped part of the image
             img_path_strings = self.image_path.split('/')
@@ -99,40 +90,20 @@ class FlairDs(Dataset):
             label = self.read_label(
                 label_path=self.label_path,
                 window=window)
-            ## Not here --> # vizualise the window crops extracted from the input image
-
             with rasterio.open(self.label_path, 'r') as label_file:
                 label = label_file.read(window=window, out_dtype=np.float32)
-               
-                
                 if self.interpolation : 
                     label = downsample_image(label[0], 8)
-                #print ('label', type(label))
-                #show(label)
             # converts label crop into contiguous tensor
             label = torch.from_numpy(label).float().contiguous()
-            if self.binary :
-                mask = label > self.label_binary
-                label[mask] = 0
-                binary_label = label.float()
-                final_label = binary_label     
-            else :
-                #mask = label >= 13
-                #label[mask] = 13
-                #multi_labels = label.float()
-                #multi_labels -= 1
-                mask = label >= 13
-                label[mask] = 13
-                multi_labels = label.float()
-                multi_labels -= 1
-                final_label = multi_labels
+            mask = label >= 13
+            label[mask] = 13
+            multi_labels = label.float()
+            multi_labels -= 1
+            final_label = multi_labels
 
         if self.img_aug is not None:            
-            # if final_label.sum() > 0:  # If sum > 0, there are buildings
-                # print(f"{final_label.sum()}")
             final_image, final_mask = self.img_aug(img=image, label=final_label)
-            # else:
-            #     final_image, final_mask = image, final_label
         else:
             final_image, final_mask = image, final_label
         return {'orig_image':image,

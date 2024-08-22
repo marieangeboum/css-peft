@@ -126,7 +126,7 @@ class SegmenterAdapt(nn.Module):
                 print(f"Pretrained weights loaded successfully from {model_path}!")
             else:
                 # Default behavior if no path is provided (e.g., loading timm model)
-                timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"clip_laion2b"]), pretrained=True)
+                timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
                 timm_vision_transformer.head = nn.Identity()
                 self.encoder.load_state_dict(timm_vision_transformer.state_dict(), strict=False)
                 print("Pretrained model loaded successfully from timm!")
