@@ -363,4 +363,3 @@ def test_function(model,test_dataloader, device, accuracy , eval_freq, data_conf
         # test_acc = {'acc': acc_sum/ len(test_dataloader)}
         # wandb.log(test_acc)
     return test_acc
-          
