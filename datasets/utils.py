@@ -264,7 +264,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
 
                 # Log IoU metrics for this image to Neptune
                 for cls_idx, cls_name in class_labels.items():
-                    run[f'val/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2), step=epoch)
+                    run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2), step=epoch)
 
         # Overall metrics and logging
         if epoch % eval_freq == 0:
@@ -282,11 +282,11 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                         ax=axs[1])
             axs[1].set_title('Confusion Matrix: Recall')
             # Log confusion matrix to Neptune
-            run[f'val/epoch_{epoch}/confusion_matrix'].upload(fig)
+            run[f'metrics/epoch_{epoch}/confusion_matrix'].upload(fig)
             # Log overall metrics to Neptune
-            run[f'val/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
-            run[f'val/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
-            run[f'val/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
+            run[f'metrics/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
+            run[f'metrics/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
+            run[f'metrics/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
     val_loss = loss_sum / len(val_dataloader)
     val_acc = acc_sum.item() / len(val_dataloader)
     val_iou = torch.mean(iou_metrics)/len(val_dataloader)
