@@ -26,27 +26,32 @@ class Segmenter(nn.Module):
         n_cls,
         patch_size,
         variant,
+        tuning_config, 
+        model_name,
         dropout = 0.1,
         drop_path_rate=0.0,
         distilled=False,
-        channels=3, 
-        ft_strat = None,
-        config = None
+        channels=3,
+        ft_strat = None
     ):
         super().__init__()
         self.n_cls = n_cls
         self.patch_size = patch_size
-        self.image_size = image_size,
-        self.n_layers = n_layers,
-        self.d_model = d_model,
-        self.d_encoder = d_encoder,
-        self.d_ff = d_ff, 
-        self.n_heads = n_heads,
-        self.variant = variant,
-        self.dropout = 0.1,
-        self.drop_path_rate = 0.0,
-        self.distilled=False,
-        self.channels=3,
+        self.image_size = image_size
+        self.n_layers = n_layers
+        self.d_model = d_model
+        self.d_encoder = d_encoder
+        self.d_ff = d_ff
+        self.n_heads = n_heads
+        self.variant = variant
+        
+        self.tuning_config = tuning_config
+        self.model_name = model_name
+        self.dropout = 0.1
+        self.drop_path_rate = 0.0
+        self.distilled=False
+        self.channels=3
+        self.ft_strat = ft_strat
                
         self.encoder=VisionTransformer(
                 image_size,
@@ -111,15 +116,25 @@ class Segmenter(nn.Module):
 
         return masks
     
-    def load_pretrained_weights(self):
-        try : 
-            timm_vision_transformer = timm.create_model('vit_base_patch16_dino', pretrained=True)
-            timm_vision_transformer.head = nn.Identity()
-            weights = timm_vision_transformer.state_dict()
-            self.encoder.load_state_dict(weights, False)
-            print("Pretrained model loaded successfully!")
+    def load_pretrained_weights(self, model_path=None):
+        """
+        Load pretrained weights into the SegmenterAdapt model.
+        
+        :param model_path: Path to the file containing the pre-trained weights. If None, loads default weights.
+        """
+        try:
+            if model_path:
+                # Load the weights from the specified path
+                checkpoint = torch.load(model_path, map_location="cuda")
+                self.load_state_dict(checkpoint, strict=False)
+                print(f"Pretrained weights loaded successfully from {model_path}!")
+            else:
+                # Default behavior if no path is provided (e.g., loading timm model)
+                timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
+                timm_vision_transformer.head = nn.Identity()
+                self.encoder.load_state_dict(timm_vision_transformer.state_dict(), strict=False)
+                print("Pretrained model loaded successfully from timm!")
         except Exception as e:
-            # Handle any exceptions that occur during loading
             print("An error occurred while loading the pretrained model:", e)
 
     def load_pretrained_weights_sam(self):
@@ -132,23 +147,28 @@ class Segmenter(nn.Module):
             
     def fine_tuning_strategy(self):
         if self.ft_strat == "lora":
-            self.apply_lora(rank=4, alpha=16, n_cls=self.n_cls)
-        elif self.ft_strat == "finetuning":
-            self.apply_finetuning()
-        elif self.ft_strat == "biastuning":
-            self.apply_biastuning()
-        elif self.ft_strat == "attntuning":
-            self.apply_attntuning()
-        elif self.ft_strat == "linprob":
-            self.apply_linprob()
-        elif self.ft_strat == "enctuning":
-            self.apply_enctuning()
+            self.apply_lora(rank=32, alpha=32, n_cls=self.n_cls)
+        # elif self.ft_strat == "finetuning":
+        #     self.apply_finetuning()
+        # elif self.ft_strat == "biastuning":
+        #     self.apply_biastuning()
+        # elif self.ft_strat == "attntuning":
+        #     self.apply_attntuning()
+        # elif self.ft_strat == "linprob":
+        #     self.apply_linprob()
+        # elif self.ft_strat == "enctuning":
+        #     self.apply_enctuning()
         else : 
             print("No specific fine-tuning strategy applied.")
-            
 
-   
-            
+    def apply_lora(self, rank, alpha, n_cls):
+        lora_vit = LoRA_ViT_timm(vit_model=self.encoder,
+                                 r=rank,
+                                 alpha=alpha,
+                                 num_classes=n_cls)
+        self.encoder = lora_vit
+
+
     def get_attention_map_enc(self, im, layer_id):
         return self.encoder.get_attention_map(im, layer_id)
 

@@ -160,7 +160,7 @@ def process_clip_boxes(image, clip_boxes, predictor):
             "crs": src_files_to_mosaic[0].crs
         })
 
-        with rasterio.open('mosaic_mask.tif', "w", **out_meta) as dest:
+        with rasterio.open('../imgs/mosaic_mask.tif', "w", **out_meta) as dest:
             dest.write(mosaic[0], 1)
     else:
         print("No valid rasters to mosaic. Skipping raster creation.")

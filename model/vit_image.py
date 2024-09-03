@@ -184,7 +184,6 @@ class VisionTransformerAdapt(nn.Module):
             pos_embed = resize_pos_embed(
                 pos_embed,
                 self.patch_embed.grid_size,
-                (H // PS, W // PS),
                 num_extra_tokens,
             )
         x = x + pos_embed

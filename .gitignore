@@ -7,3 +7,15 @@ checkpoints/
 .idea/
 open_earth_map/
 segment-anything/
+imgs/
+*/.ipynb_checkpoints/
+*/.idea/
+*/.git/
+*/.gitignore
+*/.DS_Store
+*/.vscode/
+*/.vs/
+*/.cache/
+*/.pytest_cache/
+
+

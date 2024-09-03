@@ -121,8 +121,8 @@ class SegmenterAdapt(nn.Module):
         try:
             if model_path:
                 # Load the weights from the specified path
-                checkpoint = torch.load(model_path, map_location="cpu")
-                self.load_state_dict(checkpoint['model'], strict=False)
+                checkpoint = torch.load(model_path, map_location="cuda")
+                self.load_state_dict(checkpoint, strict=False)
                 print(f"Pretrained weights loaded successfully from {model_path}!")
             else:
                 # Default behavior if no path is provided (e.g., loading timm model)

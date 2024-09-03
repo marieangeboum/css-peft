@@ -36,9 +36,9 @@ def load_config_yaml(file_path):
         config = yaml.safe_load(f)
     return config
 
-def update_domain_sequence(config_file, new_domain_sequence):
+def update_domain_sequence(config_file, new_domain_sequence, field = "domain_sequence"):
     config = load_config_yaml(config_file)
-    config['domain_sequence'] = new_domain_sequence
+    config["dataset"]["flair1"][field] = new_domain_sequence
     with open(config_file, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
 

@@ -99,14 +99,13 @@ def create_train_dataloader(domain_img_train, args,data_config, binary, label_bi
         num_workers=n_workers)  
     return train_dataloader
     
-def create_val_dataloader(domain_img_val,  args,data_config, binary, label_binary=1): 
+def create_val_dataloader(domain_img_val,  args,data_config,label_binary=1):
     data_path = data_config["data_path"]
     im_size = data_config["im_size"]
     win_size = data_config["window_size"]
     win_stride = data_config["window_stride"]
     img_aug = args.img_aug
     binary = data_config["binary"]
-    # epoch_len = args.epoch_len
     sup_batch_size = args.sup_batch_size
     n_workers = args.workers
     val_datasets = []
@@ -130,12 +129,11 @@ def create_val_dataloader(domain_img_val,  args,data_config, binary, label_binar
         num_workers=n_workers)  
     return val_dataloader
     
-def create_test_dataloader(domain_img_test,  args,data_config, binary, label_binary=1): 
+def create_test_dataloader(domain_img_test,  args,data_config, binary, label_binary=1):
     data_path = data_config["data_path"]
     im_size = data_config["im_size"]
     win_size = data_config["window_size"]
     win_stride = data_config["window_stride"]
-    
     img_aug = args.img_aug
     binary = data_config["binary"]
     # epoch_len = args.epoch_len
@@ -152,7 +150,7 @@ def create_test_dataloader(domain_img_test,  args,data_config, binary, label_bin
                             crop_size=win_size,        
                             crop_step=win_stride,
                             img_aug=img_aug, binary=binary, label_binary=label_binary))
-    testset =  ConcatDataset(test_datasets)
+    testset = ConcatDataset(test_datasets)
     test_dataloader = DataLoader(
         dataset=testset,
         shuffle=False,
@@ -163,16 +161,15 @@ def create_test_dataloader(domain_img_test,  args,data_config, binary, label_bin
 
 def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, epoch, data_config, run ):
     n_channels = data_config['n_channels']
-    interpolation = data_config["interpolation"]
+
     class_labels = data_config["classnames"]
     n_class = data_config["n_cls"]
     loss_sum = 0.0
     acc_sum = 0.0
     for i, batch in tqdm(enumerate(train_dataloader), total = len(train_dataloader)) :
         image = (batch['image'][:,:n_channels,:,:]/255.).to(device)
-        # target = (batch['mask']).to(device)
-        if interpolation :
-            target = (batch['mask']).to(device)
+        target = (batch['mask']).to(device)
+
         optimizer.zero_grad()
         logits = model(image)
         loss = loss_fn(F.softmax(logits, dim=1),target.squeeze(1).long())
@@ -228,7 +225,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
         iou_metrics += torch.tensor(metrics_per_class_df.IoU.values)
 
         # Evaluate and log images at specific intervals
-        if epoch % eval_freq == 0 and i % 10 == 0:
+        if epoch % 10 == 0 and i % eval_freq == 0:
             for img in idx_list:
                 domain_id = batch['id'][img]
                 # Compute metrics for specific images
@@ -267,26 +264,26 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                     run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2), step=epoch)
 
         # Overall metrics and logging
-        if epoch % eval_freq == 0:
-            confusion_mats = sum(confusion_matrices)
-            metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
+            if epoch % eval_freq == 0:
+                confusion_mats = sum(confusion_matrices)
+                metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
 
-            # Confusion matrix visualization
-            fig, axs = plt.subplots(1, 2, figsize=(20, 10))
-            sns.heatmap(confusion_mats / confusion_mats.sum(axis=0), annot=True, fmt='.2f',
-                        xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="crest",
-                        ax=axs[0])
-            axs[0].set_title('Confusion Matrix: Precision')
-            sns.heatmap(confusion_mats / confusion_mats.sum(axis=1), annot=True, fmt='.2f',
-                        xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="cubehelix",
-                        ax=axs[1])
-            axs[1].set_title('Confusion Matrix: Recall')
-            # Log confusion matrix to Neptune
-            run[f'metrics/epoch_{epoch}/confusion_matrix'].upload(fig)
-            # Log overall metrics to Neptune
-            run[f'metrics/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
-            run[f'metrics/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
-            run[f'metrics/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
+                # Confusion matrix visualization
+                fig, axs = plt.subplots(1, 2, figsize=(20, 10))
+                sns.heatmap(confusion_mats /  (confusion_mats.sum(axis=0) + np.finfo(float).eps), annot=True, fmt='.2f',
+                            xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="crest",
+                            ax=axs[0])
+                axs[0].set_title('Confusion Matrix: Precision')
+                sns.heatmap(confusion_mats / (confusion_mats.sum(axis=1)[:, np.newaxis] + np.finfo(float).eps), annot=True, fmt='.2f',
+                            xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="cubehelix",
+                            ax=axs[1])
+                axs[1].set_title('Confusion Matrix: Recall')
+                # Log confusion matrix to Neptune
+                run[f'metrics/epoch_{epoch}/confusion_matrix'].upload(fig)
+                # Log overall metrics to Neptune
+                run[f'metrics/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
+                run[f'metrics/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
+                run[f'metrics/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
     val_loss = loss_sum / len(val_dataloader)
     val_acc = acc_sum.item() / len(val_dataloader)
     val_iou = torch.mean(iou_metrics)/len(val_dataloader)

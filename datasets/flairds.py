@@ -116,22 +116,6 @@ class FlairDs(Dataset):
 
 
 
-    # print(len(dataset))
-    # for data in dataset:
-    #     pass
-    # img = plt.imshow(dataset[0]['image'].numpy().transpose(1,2,0))
-
-    # plt.show()
-# from PIL import Image
-# tiff_file = image_path
-# image=rasterio.open(tiff_file)
-
-# array = image.read(1)
-# array.shape
-
-
-
-
 
 
 

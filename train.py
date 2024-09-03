@@ -9,6 +9,7 @@ from argparse import ArgumentParser
 from torch.optim import SGD, Adam # type: ignore
 from torch.optim.lr_scheduler import LambdaLR # type: ignore
 from model.segmenter_adapt import SegmenterAdapt
+from model.segmenter import Segmenter
 from dl_toolbox.callbacks import EarlyStopping # type: ignore
 
 
@@ -38,7 +39,7 @@ def main():
     parser.add_argument("--crop_size", type=int, default=256)
     parser.add_argument("--workers", default=6, type=int)
     parser.add_argument('--img_aug', type=str, default='d4_rot90_rot270_rot180_d1flip')
-    parser.add_argument('--max_epochs', type=int, default=150)   
+    parser.add_argument('--max_epochs', type=int, default=100)
     parser.add_argument('--sequence_path', type = str, default = "")
     parser.add_argument('--train_split_coef', type = float, default = 0.85)
     parser.add_argument('--strategy', type = str, default = 'continual_{}')
@@ -47,7 +48,7 @@ def main():
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
-    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint.pth",
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint{}.pth",
                         help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
@@ -115,17 +116,10 @@ def main():
         nb_task = len(data_sequence[:5]),
         tasks = data_sequence[:5]) 
     
-    
+    test_dataloaders = []
     for step,domain in enumerate(tuning_config.tasks):
         train_imgs, test_imgs = [],[]
-        test_dataloaders = []
-        run = neptune.init_run(
-                project="continual-semantic-segmentation/peft-methods",
-                api_token=api_token,
-                name=f"AdaptFormerSeg{step}",
-                description="First run for Adapters project",
-                tags=["adaptmlp", "test", "segmenter", "vit-base", "patch8"])
-
+        
         img = glob.glob(os.path.join(directory_path, '{}/Z*_*/img/IMG_*.tif'.format(domain)))
         random.shuffle(img)
         train_imgs += img[:int(len(img)*args.train_split_coef)]
@@ -141,13 +135,27 @@ def main():
 
         test_dataloader = create_test_dataloader(test_imgs, args, data_config, binary= binary)
         test_dataloaders.append(test_dataloader)
-
+        if step == 0:
+            print(f"Skipping {step}...")
+            continue
+        run = neptune.init_run(
+                project="continual-semantic-segmentation/peft-methods",
+                api_token=api_token,
+                name=f"AdaptFormerSeg{step}",
+                description="Baseline for Adapters project",
+                tags=["adaptmlp", "segmenter", "vit-base", "patch8"])
         # Model Definition
         segmentation_model_path = os.path.join(config["checkpoints"],args.sequence_path.format(seed),
                                  '{}_{}'.format(args.strategy.format(train_type),seed))
         segmentation_model = SegmenterAdapt(im_size, n_layers, d_model, d_encoder, 4 * d_model, n_heads, n_class,
                                             patch_size, selected_model, tuning_config=tuning_config,
                                             model_name=config["model_name"], id = step).to(device)
+        
+        
+        # segmentation_model = Segmenter(im_size, n_layers, d_model, d_encoder, 4 * d_model, n_heads, n_class,
+        #                                 patch_size, selected_model, tuning_config=tuning_config,
+        #                                 model_name=config["model_name"], id = step).to(device)
+
         segmentation_model.load_pretrained_weights()
         for param in segmentation_model.encoder.parameters():
             param.requires_grad = False
@@ -170,8 +178,7 @@ def main():
             all_weights = np.insert(all_weights, missing_key, 0.)
 
         # Callbacks
-        early_stopping = EarlyStopping(patience=20, verbose=True, 
-                                       delta=0.001,path=segmentation_model_path)
+        early_stopping = EarlyStopping(patience=40, verbose=True, delta_loss=0.001, delta_iou=0.001,path=segmentation_model_path)
         optimizer = SGD(segmentation_model.parameters(),
                         lr=args.initial_lr,
                         momentum=0.9)
@@ -181,7 +188,7 @@ def main():
         accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
 
         # Check if a checkpoint exists and load it
-        checkpoint = load_checkpoint(args.checkpoint_file)
+        checkpoint = load_checkpoint(args.checkpoint_file.format(step))
 
         if checkpoint:
             start_epoch = checkpoint['epoch']
@@ -195,15 +202,15 @@ def main():
         for epoch in range(start_epoch,args.max_epochs):
             time_ep = time.time()
             segmentation_model, train_acc, train_loss = train_function(segmentation_model,train_loader, 
-                                                device,optimizer, loss_fn,
-                                                accuracy,epoch, data_config, run)
+                                                                        device,optimizer, loss_fn,
+                                                                        accuracy,epoch, data_config, run)
             print(train_acc, train_loss)
             scheduler.step()
             segmentation_model, val_loss, val_acc, val_iou = validation_function(segmentation_model,val_loader, 
-                                                               device,loss_fn,
-                                                               accuracy, epoch, data_config, run)
+                                                                                device,loss_fn,
+                                                                                accuracy, epoch, data_config, run)
             
-            print(val_acc, val_loss)
+            print(val_acc, val_loss, val_iou)
             save_checkpoint({
                 'epoch': epoch,
                 'model_state_dict': segmentation_model.state_dict(),
@@ -215,9 +222,9 @@ def main():
                 'train_acc': train_acc,
                 'val_acc': val_acc,
                 'val_iou': val_iou
-            }, filename=args.checkpoint_file)
+            }, filename=args.checkpoint_file.format(step))
 
-            early_stopping(val_loss,segmentation_model)
+            early_stopping(val_loss,val_iou, segmentation_model)
             if early_stopping.early_stop:
                 break
             time_ep = time.time() - time_ep
