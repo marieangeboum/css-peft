@@ -65,10 +65,13 @@ class SegmenterAdapt(nn.Module):
                 channels=3, 
                 task_id= self.id
             )
-        # self.decoder = DecoderLinear(n_cls, patch_size, d_model)
-        self.decoder_pool = nn.ModuleList([MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
-                                       n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1) 
-                                       for i in range(self.tuning_config.nb_task)])
+        if self.tuning_config.decoder == 'linear': 
+            self.decoder_pool = nn.ModuleList([DecoderLinear(n_cls, patch_size, d_model) 
+                                            for i in range(self.tuning_config.nb_task)])
+        elif self.tuning_config.decoder == 'masktransformer': 
+            self.decoder_pool = nn.ModuleList([MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
+                                            n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1) 
+                                            for i in range(self.tuning_config.nb_task)])
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -165,5 +168,4 @@ class SegmenterAdapt(nn.Module):
         # remove CLS/DIST tokens for decoding
         num_extra_tokens = 1 + self.encoder.distilled
         x = x[:, num_extra_tokens:]
-        return self.decoder.get_attention_map(x, layer_id)
-    
+        

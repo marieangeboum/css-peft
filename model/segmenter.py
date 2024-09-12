@@ -66,11 +66,11 @@ class Segmenter(nn.Module):
                 distilled=False,
                 channels=3,
             )
-        #else :
-        #    self.encoder = 
-        # self.decoder = DecoderLinear(n_cls, patch_size, d_model)
-        self.decoder = MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
-                                       n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1)
+        if self.tuning_config.decoder == 'linear': 
+            self.decoder = DecoderLinear(n_cls, patch_size, d_model)
+        elif self.tuning_config.decoder == 'masktransformer': 
+            self.decoder = MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
+                                        n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1)
 
     @torch.jit.ignore
     def no_weight_decay(self):

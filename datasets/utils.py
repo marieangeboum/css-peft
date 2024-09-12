@@ -187,7 +187,7 @@ def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, 
     return model, train_acc, train_loss
 
 
-def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=10):
+def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=50):
     n_channels = data_config['n_channels']
     interpolation = data_config["interpolation"]
     img_logs = data_config["img_logs"]
@@ -257,11 +257,11 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                            bbox_to_anchor=(0.5, 0.11), fontsize='small')
 
                 # Log figure to Neptune
-                run[f'val/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
+                run[f'imgs/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
 
                 # Log IoU metrics for this image to Neptune
                 for cls_idx, cls_name in class_labels.items():
-                    run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2), step=epoch)
+                    run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2))
 
         # Overall metrics and logging
             if epoch % eval_freq == 0:
