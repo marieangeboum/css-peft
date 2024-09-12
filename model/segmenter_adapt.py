@@ -168,4 +168,5 @@ class SegmenterAdapt(nn.Module):
         # remove CLS/DIST tokens for decoding
         num_extra_tokens = 1 + self.encoder.distilled
         x = x[:, num_extra_tokens:]
-        
+        return self.decoder.get_attention_map(x, layer_id)
+    
