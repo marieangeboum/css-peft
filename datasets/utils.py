@@ -161,7 +161,6 @@ def create_test_dataloader(domain_img_test,  args,data_config, binary, label_bin
 
 def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, epoch, data_config, run ):
     n_channels = data_config['n_channels']
-
     class_labels = data_config["classnames"]
     n_class = data_config["n_cls"]
     loss_sum = 0.0
@@ -255,14 +254,15 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                                   for j in class_labels]
                 fig.legend(handles=legend_patches, loc='upper center', ncol=4,
                            bbox_to_anchor=(0.5, 0.11), fontsize='small')
+                
 
                 # Log figure to Neptune
                 run[f'imgs/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
-
+                
                 # Log IoU metrics for this image to Neptune
                 for cls_idx, cls_name in class_labels.items():
                     run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2))
-
+                plt.close(fig)
         # Overall metrics and logging
             if epoch % eval_freq == 0:
                 confusion_mats = sum(confusion_matrices)

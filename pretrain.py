@@ -48,7 +48,7 @@ def main():
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
-    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint.pth",
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/sup_checkpoint.pth",
                         help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
@@ -126,24 +126,24 @@ def main():
                 name=f"Segmenter",
                 description="Pretrain for Adapters project",
                 tags=["pretrain", "segmenter", "vit-base", "patch8",tuning_config.decoder])
+    all_imgs = []
     for step,domain in enumerate(tuning_config.tasks):      
-
         img = glob.glob(os.path.join(directory_path, '{}/Z*_*/img/IMG_*.tif'.format(domain)))
         random.shuffle(img)
-        train_imgs += img[:int(len(img)*args.train_split_coef)]
-        test_imgs += img[int(len(img)*args.train_split_coef):]
-        
+        all_imgs.extend(img)
+    train_imgs = all_imgs[:int(len(all_imgs)*args.train_split_coef)]
+    test_imgs  = all_imgs[int(len(all_imgs)*args.train_split_coef):] 
     random.shuffle(train_imgs)
+
     # Train&Validation Data
     domain_img_train = train_imgs[:int(len(train_imgs)*.90)]
+    print(len(domain_img_train))
     random.shuffle(domain_img_train)
     domain_img_val = train_imgs[int(len(train_imgs)*.90):]
+    print(len(domain_img_val))
     random.shuffle(domain_img_val)
     train_loader = create_train_dataloader(domain_img_train, args, data_config, binary= binary)
     val_loader = create_val_dataloader(domain_img_val, args, data_config)
-
-    # test_dataloader = create_test_dataloader(test_imgs, args, data_config, binary= binary)
-        
 
     # Model Definition
     segmentation_model_path = os.path.join(config["checkpoints"],args.sequence_path.format(seed),

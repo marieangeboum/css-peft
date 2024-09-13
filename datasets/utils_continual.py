@@ -61,10 +61,13 @@ def calculate_metrics_for_image(model, image, output, target, device, binary=Fal
     
     return metrics_per_class_df
 
+def attention_weights_train(model, image, target, device):
+
+    
+    return attention_weights
 
 def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, epoch, data_config, run ):
     n_channels = data_config['n_channels']
-
     class_labels = data_config["classnames"]
     n_class = data_config["n_cls"]
     loss_sum = 0.0
@@ -74,6 +77,10 @@ def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, 
         target = (batch['mask']).to(device)
 
         optimizer.zero_grad()
+        with torch.no_grad():
+            teacher_logits = model(image)
+
+            
         logits = model(image)
         loss = loss_fn(F.softmax(logits, dim=1),target.squeeze(1).long())
         acc = accuracy(F.softmax(logits, dim=1).argmax(dim=1).unsqueeze(1), target.long())

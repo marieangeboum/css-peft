@@ -8,7 +8,7 @@ from model.utils import *
 from timm.models.layers import trunc_normal_ # type: ignore
 from peft_methods.lora import *
 import peft_methods.vit_image as vit_image
-from model.vit_image import VisionTransformerAdapt
+from model.vitadapt import VisionTransformerAdapt
 
 class SegmenterAdapt(nn.Module):
     def __init__(
@@ -129,9 +129,10 @@ class SegmenterAdapt(nn.Module):
                 print(f"Pretrained weights loaded successfully from {model_path}!")
             else:
                 # Default behavior if no path is provided (e.g., loading timm model)
-                timm_vision_transformer = timm.create_model('_'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
+                timm_vision_transformer = timm.create_model('.'.join(['_'.join([self.model_name,"224"]),"dino"]), pretrained=True)
                 timm_vision_transformer.head = nn.Identity()
                 self.encoder.load_state_dict(timm_vision_transformer.state_dict(), strict=False)
+                self.encoder.head = nn.Identity()
                 print("Pretrained model loaded successfully from timm!")
         except Exception as e:
             print("An error occurred while loading the pretrained model:", e)

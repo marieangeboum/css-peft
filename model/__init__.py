@@ -1,5 +1,5 @@
 from model.vit import *
-from model.vit_image import *
+from model.vitadapt import *
 from model.utils import *
 from model.decoder import *
 from model.segmenter import *
