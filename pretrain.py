@@ -39,16 +39,16 @@ def main():
     parser.add_argument("--crop_size", type=int, default=256)
     parser.add_argument("--workers", default=6, type=int)
     parser.add_argument('--img_aug', type=str, default='d4_rot90_rot270_rot180_d1flip')
-    parser.add_argument('--max_epochs', type=int, default=200)
+    parser.add_argument('--max_epochs', type=int, default=400)
     parser.add_argument('--sequence_path', type = str, default = "")
     parser.add_argument('--train_split_coef', type = float, default = 0.85)
-    parser.add_argument('--strategy', type = str, default = 'pretrain_mask{}')
+    parser.add_argument('--strategy', type = str, default = 'pretrain9_{}')
     parser.add_argument("--commit", type = str )
     parser.add_argument("--train_type", type = str, default="adaptmlp")
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
-    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/sup_checkpoint.pth",
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/sup_checkpoint9.pth",
                         help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
@@ -125,14 +125,13 @@ def main():
                 api_token=api_token,
                 name=f"Segmenter",
                 description="Pretrain for Adapters project",
-                tags=["pretrain", "segmenter", "vit-base", "patch8",tuning_config.decoder])
+                tags=["pretrain", "segmenter", "vit-base", "patch8",tuning_config.decoder, "9 classes"])
     all_imgs = []
     for step,domain in enumerate(tuning_config.tasks):      
         img = glob.glob(os.path.join(directory_path, '{}/Z*_*/img/IMG_*.tif'.format(domain)))
         random.shuffle(img)
         all_imgs.extend(img)
     train_imgs = all_imgs[:int(len(all_imgs)*args.train_split_coef)]
-    test_imgs  = all_imgs[int(len(all_imgs)*args.train_split_coef):] 
     random.shuffle(train_imgs)
 
     # Train&Validation Data
@@ -159,14 +158,8 @@ def main():
     print(f"trainable parameters: {num_params:.4f}M \n\n")
     
     #Class Weights
-    class_weights, cumulative_weights = domain_class_weights(metadata,data_sequence, 
-                                                                binary=binary,binary_label = 0)
-    weights_keys = list(class_weights[domain].keys())
-    weights = list(class_weights[domain].values())
-    missing_key = (n_class-1)*(n_class)//2 - sum(weights_keys)
-    all_weights = np.array([1./(value/100) for value in weights])
-    if len(all_weights) != n_class :
-        all_weights = np.insert(all_weights, missing_key, 0.)
+    class_frequencies = np.array([float(str(val).replace(',', '').strip()) for val in data_config["class_weights"].values()])
+    all_weights = 1./class_frequencies
 
     # Callbacks
     early_stopping = EarlyStopping(patience=40, verbose=True, delta_loss=0.001, delta_iou=0.001,path=segmentation_model_path)
@@ -175,7 +168,6 @@ def main():
                     momentum=0.9)
     scheduler = LambdaLR(optimizer,lr_lambda= lambda_lr, verbose = True)
     loss_fn = torch.nn.CrossEntropyLoss(weight = torch.tensor(all_weights).float()).cuda()
-    #loss_fn = torch.nn.CrossEntropyLoss().cuda()
     accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
 
     # Check if a checkpoint exists and load it

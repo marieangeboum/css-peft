@@ -8,6 +8,7 @@ import seaborn as sns
 from neptune.types import File # type: ignore
 from tqdm import tqdm
 from torchvision import transforms
+import torchvision.utils as vutils
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import dl_toolbox.inference as dl_inf
@@ -66,24 +67,25 @@ def attention_weights_train(model, image, target, device):
     
     return attention_weights
 
-def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, epoch, data_config, run ):
+def train_function_recurrent(model,train_dataloader, device,optimizer, loss_fn,
+                             accuracy, epoch, data_config, run, soft_target_loss_weight, ce_loss_weight,step,T = 2):
+
     n_channels = data_config['n_channels']
-    class_labels = data_config["classnames"]
-    n_class = data_config["n_cls"]
     loss_sum = 0.0
     acc_sum = 0.0
     for i, batch in tqdm(enumerate(train_dataloader), total = len(train_dataloader)) :
         image = (batch['image'][:,:n_channels,:,:]/255.).to(device)
         target = (batch['mask']).to(device)
-
         optimizer.zero_grad()
         with torch.no_grad():
-            teacher_logits = model(image)
-
-            
-        logits = model(image)
-        loss = loss_fn(F.softmax(logits, dim=1),target.squeeze(1).long())
-        acc = accuracy(F.softmax(logits, dim=1).argmax(dim=1).unsqueeze(1), target.long())
+            teacher_logits = model(image, step-1)
+            soft_targets = F.softmax(teacher_logits, dim=1) /T
+        student_logits = model(image, step)
+        soft_prob = F.log_softmax(student_logits/T, dim=1)
+        soft_targets_loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (T**2)
+        label_loss = loss_fn(student_logits, target.squeeze(1).long())
+        loss = soft_target_loss_weight * soft_targets_loss + ce_loss_weight * label_loss
+        acc = accuracy(F.softmax(student_logits, dim=1).argmax(dim=1).unsqueeze(1), target.long())
         loss_sum += loss.item()
         acc_sum += acc
         loss.backward()
@@ -93,15 +95,13 @@ def train_function(model,train_dataloader, device,optimizer, loss_fn, accuracy, 
     train_acc = acc_sum/len(train_dataloader)
     run["train/accuracy"].append(train_acc, step=epoch)
     run["train/loss"].append(train_loss, step=epoch)
-
     return model, train_acc, train_loss
 
 
-def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run, eval_freq=50):
+def validation_function_recurrent(model, val_dataloader, device, loss_fn, accuracy, epoch, data_config, run,
+                                  step, eval_freq=50):
     n_channels = data_config['n_channels']
-    interpolation = data_config["interpolation"]
-    img_logs = data_config["img_logs"]
-    idx_list = [0, -1]
+    idx_list = list(range(8))
     class_labels = data_config["classnames"]
     n_class = data_config["n_cls"]
     # Initialize accumulators
@@ -112,9 +112,10 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
         # Preprocess input and target
         image = (batch['image'][:, :n_channels, :, :] / 255.).to(device)
         target = batch['mask'].to(device)
-        
+
+
         # Model forward pass
-        output = model(image)
+        output = model(image, step)
         softmax_output = F.softmax(output, dim=1)
 
         # Compute loss and accuracy
@@ -129,62 +130,87 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
         cm = compute_conf_mat(target.contiguous().view(-1).cpu(),
                               output.argmax(dim=1).contiguous().view(-1).cpu().long(), n_class)
         confusion_matrices.append(cm.numpy())
-
         # Compute IoU for each class
         metrics_per_class_df, _, _ = dl_inf.cm2metrics(cm.numpy())
         iou_metrics += torch.tensor(metrics_per_class_df.IoU.values)
 
+
         # Evaluate and log images at specific intervals
         if epoch % 10 == 0 and i % eval_freq == 0:
-            for img in idx_list:
-                domain_id = batch['id'][img]
-                # Compute metrics for specific images
-                img_cm = compute_conf_mat(
+            domain_ids = batch['id']
+            outputs = output.argmax(dim=1)
+            iou_metrics = []
+
+            # Use torch.no_grad to prevent gradients being computed during inference
+            with torch.no_grad():
+                # Process all images in the batch
+                img_cms = [compute_conf_mat(
                     target[img].contiguous().view(-1).cpu(),
-                    output.argmax(dim=1)[img].contiguous().view(-1).cpu().long(),
+                    outputs[img].contiguous().view(-1).cpu().long(),
                     n_class
-                )
-                img_metrics_per_class_df, _, _ = dl_inf.cm2metrics(img_cm.numpy())
-                # Plot predictions and ground truth
-                predictions = overlay_segmentation(image[img].permute(1, 2, 0).cpu().numpy(),
-                                                   output.argmax(dim=1)[img].cpu().numpy(),
-                                                   class_labels)
-                ground_truth = overlay_segmentation(image[img].permute(1, 2, 0).cpu().numpy(),
-                                                    target[img, 0].cpu().numpy(),
-                                                    class_labels)
+                ) for img in idx_list]
+                # Compute metrics for all images
+                img_metrics_list = [dl_inf.cm2metrics(img_cm.numpy())[0] for img_cm in img_cms]
+                # Overlay predictions and ground truth for all images
+                predictions_batch = [
+                    overlay_segmentation(image[img].permute(1, 2, 0).cpu().numpy(),
+                                         outputs[img].cpu().numpy(),
+                                         class_labels)
+                    for img in idx_list
+                ]
+                ground_truth_batch = [
+                    overlay_segmentation(image[img].permute(1, 2, 0).cpu().numpy(),
+                                         target[img, 0].cpu().numpy(),
+                                         class_labels)
+                    for img in idx_list
+                ]
+                # Stack and create grids for predictions and ground truth
+                predictions_grid = vutils.make_grid(
+                    [torch.tensor(prediction).permute(2, 0, 1) for prediction in predictions_batch],
+                    nrow=len(idx_list) // 2)
+                ground_truth_grid = vutils.make_grid([torch.tensor(gt).permute(2, 0, 1) for gt in ground_truth_batch],
+                                                     nrow=len(idx_list) // 2)
+                # Convert grids back to numpy for plotting
+                predictions_grid_np = predictions_grid.permute(1, 2, 0).cpu().numpy()
+                ground_truth_grid_np = ground_truth_grid.permute(1, 2, 0).cpu().numpy()
+
+                # Plot the grids
                 fig, axs = plt.subplots(1, 2, figsize=(15, 7.5))
-                axs[0].imshow(predictions)
-                axs[0].set_title("Predictions")
+                axs[0].imshow(predictions_grid_np)
+                axs[0].set_title(f"Predictions - Batch {i}")
                 axs[0].axis('off')
-                axs[1].imshow(ground_truth)
-                axs[1].set_title("Ground Truth")
+
+                axs[1].imshow(ground_truth_grid_np)
+                axs[1].set_title(f"Ground Truth - Batch {i}")
                 axs[1].axis('off')
 
-                # Legend
-                legend_patches = [mpatches.Patch(color=plt.cm.tab20(j / len(class_labels)), label=class_labels[j])
+                # Legend for class labels
+                legend_patches = [mpatches.Patch(color=plt.cm.tab20(j/ len(class_labels)), label=class_labels[j])
                                   for j in class_labels]
                 fig.legend(handles=legend_patches, loc='upper center', ncol=4,
-                           bbox_to_anchor=(0.5, 0.11), fontsize='small')
+                           bbox_to_anchor=(0.5, 0.05), fontsize='small')
+                # Log the batch figure to Neptune
+                run[f'imgs/epoch_{epoch}/batch_{i}/all_domains'].upload(fig)
+                # Log IoU metrics for each image in the batch to Neptune as a DataFrame
+                for idx, img in enumerate(idx_list):
+                    domain_id = domain_ids[img]
+                    img_metrics_per_class_df = img_metrics_list[idx]
 
-                # Log figure to Neptune
-                run[f'imgs/epoch_{epoch}/batch_{i}/domain_{domain_id}'].upload(fig)
-
-                # Log IoU metrics for this image to Neptune
-                for cls_idx, cls_name in class_labels.items():
-                    run[f'metrics/{domain_id}_{i}_{cls_name}_iou'].append(img_metrics_per_class_df.IoU.loc[cls_idx].round(2))
-
-        # Overall metrics and logging
+                    # Log the whole DataFrame containing IoU metrics for this image
+                    run[f'dataframes/{domain_id}_{i}_iou_{epoch}'].upload(File.as_html(img_metrics_per_class_df.round(2)))
+                plt.close(fig)
+            # Overall metrics and logging
             if epoch % eval_freq == 0:
                 confusion_mats = sum(confusion_matrices)
                 metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
 
                 # Confusion matrix visualization
                 fig, axs = plt.subplots(1, 2, figsize=(20, 10))
-                sns.heatmap(confusion_mats /  (confusion_mats.sum(axis=0) + np.finfo(float).eps), annot=True, fmt='.2f',
+                sns.heatmap(confusion_mats/(confusion_mats.sum(axis=0) + np.finfo(float).eps), annot=True, fmt='.2f',
                             xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="crest",
                             ax=axs[0])
                 axs[0].set_title('Confusion Matrix: Precision')
-                sns.heatmap(confusion_mats / (confusion_mats.sum(axis=1)[:, np.newaxis] + np.finfo(float).eps), annot=True, fmt='.2f',
+                sns.heatmap(confusion_mats/(confusion_mats.sum(axis=1)[:, np.newaxis] + np.finfo(float).eps), annot=True, fmt='.2f',
                             xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), cmap="cubehelix",
                             ax=axs[1])
                 axs[1].set_title('Confusion Matrix: Recall')
@@ -194,6 +220,7 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
                 run[f'metrics/epoch_{epoch}/metrics_per_class'].upload(File.as_html(metrics_per_class_df.round(2)))
                 run[f'metrics/epoch_{epoch}/macro_average_metrics'].upload(File.as_html(macro_average_metrics_df.round(2)))
                 run[f'metrics/epoch_{epoch}/micro_average_metrics'].upload(File.as_html(micro_average_metrics_df.round(2)))
+
     val_loss = loss_sum / len(val_dataloader)
     val_acc = acc_sum.item() / len(val_dataloader)
     val_iou = torch.mean(iou_metrics)/len(val_dataloader)
@@ -202,71 +229,3 @@ def validation_function(model, val_dataloader, device, loss_fn, accuracy, epoch,
     run["val/loss"].append(val_loss, step=epoch)
     run["val/iou"].append(val_iou, step=epoch)
     return model, val_loss, val_acc, val_iou
-
-
-def test_function(model,test_dataloader, device, accuracy , eval_freq, data_config, domain, step):
-    acc_sum = 0.0
-    n_channels = data_config['n_channels']
-    binary =  data_config["binary"]
-    interpolation = data_config["interpolation"]
-    norm_means = data_config["norm_task"]["norm_means"]
-    norm_stds = data_config["norm_task"]["norm_stds"]
-    norm_transforms = transforms.Compose([transforms.Normalize(norm_means[:n_channels], norm_stds[:n_channels])])
-    if binary: 
-        class_labels = data_config["classnames_binary"]
-        n_class = 2
-    else :
-        class_labels = data_config["classnames"]
-        n_class = data_config["n_cls"]
-    confusion_matrices = []
-    with torch.no_grad():
-        for i, batch in tqdm(enumerate(test_dataloader), total = len(test_dataloader)):
-            image = (batch['image'][:,:n_channels,:,:]/255.).to(device)
-            if interpolation :
-                target = (batch['mask']).to(device)
-            target_view = target
-            output = model(image)
-            # target = F.one_hot(target.long()[:,0,:,:],n_class).permute(0, 3, 1, 2).to(device)
-            if binary :
-                target = F.one_hot(target[:,0,:,:].long(),n_class).permute(0, 3, 1, 2).to(device)
-                acc = accuracy(torch.sigmoid(output).contiguous().view(-1),
-                                target.contiguous().view(-1))
-                cm = compute_conf_mat(
-                    target.contiguous().view(-1).cpu(),
-                    (torch.sigmoid(output)>.5).contiguous().view(-1).cpu(), n_class)
-            else :
-                acc = accuracy(F.softmax(output, dim=1).argmax(dim=1).unsqueeze(1), target.long())
-                cm = compute_conf_mat(
-                    target.contiguous().view(-1).cpu(),
-                    output.argmax(dim = 1).contiguous().view(-1).cpu(), n_class)
-            acc_sum += acc
-            confusion_matrices.append(cm.numpy())
-            # wandb_image_test.append(
-            #     wandb.Image(image[0,:,:,:].permute(1, 2, 0).cpu().numpy(), 
-            #     masks={"prediction" :
-            #     {"mask_data" : F.softmax(output, dim=1).argmax(dim=1)[0,:,:].cpu().numpy(), "class_labels" : class_labels},
-            #     "ground truth" : 
-            #     {"mask_data" : target_view[0,0,:,:].cpu().numpy(), "class_labels" : class_labels}}, 
-            #     caption= "batch_{}_domain_{}".format(i, batch['id'][0])))
-            # if i % 200 == 0 :
-            #     wandb.log({f"(Inf) Predictions {step} {domain}": wandb_image_test})
-        confusion_mats = sum(confusion_matrices)
-        metrics_per_class_df, macro_average_metrics_df, micro_average_metrics_df = dl_inf.cm2metrics(confusion_mats)
-        fig = plt.figure(figsize=(20, 10))
-        ax1 = fig.add_subplot(121)
-        sns.heatmap(confusion_mats/confusion_mats.sum(axis = 0), annot=True, fmt='.2f', 
-                    xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), 
-                    cmap = "crest")
-        ax1.set_title('Confusion Matrix : Precision')
-        ax2 = fig.add_subplot(122)
-        sns.heatmap(confusion_mats/confusion_mats.sum(axis = 1), annot=True, fmt='.2f', 
-                    xticklabels=list(class_labels.values()), yticklabels=list(class_labels.values()), 
-                    cmap = sns.cubehelix_palette(as_cmap=True))
-        ax2.set_title('Confusion Matrix : Recall')
-        # wandb.log({f"Confusion Matrix (Inference) {step} {domain}":wandb.Image(fig)})
-        # wandb.log({f'Metrics Class (Inference) {step} {domain}': wandb.Table(dataframe= metrics_per_class_df)})
-        # wandb.log({f'Macro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= macro_average_metrics_df)})
-        # wandb.log({f'Micro Average Class (Inference) {step} {domain}': wandb.Table(dataframe= micro_average_metrics_df)})
-        # test_acc = {'acc': acc_sum/ len(test_dataloader)}
-        # wandb.log(test_acc)
-    return test_acc

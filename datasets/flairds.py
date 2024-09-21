@@ -5,7 +5,7 @@ import torch
 from dl_toolbox.utils import get_tiles
 from dl_toolbox.torch_datasets.utils import *
 from dl_toolbox.torch_datasets.commons import minmax
-
+from torchvision.transforms.functional import to_pil_image, to_tensor
 import rasterio
 import imagesize
 import numpy as np
@@ -35,7 +35,6 @@ def downsample_image(image, scale):
             downscaled_image[i, j] = major_value
     
     return downscaled_image
-
 
 class FlairDs(Dataset):
     def __init__(self,image_path,tile,fixed_crops, crop_size,crop_step, img_aug,
@@ -85,27 +84,41 @@ class FlairDs(Dataset):
 
         # converts image crop into a tensor more precisely returns a contiguous tensor containing the same data as self tensor.
         image = torch.from_numpy(image_rasterio).float().contiguous()
-        label = None
+        # label = None
         if self.label_path:
-            label = self.read_label(
-                label_path=self.label_path,
-                window=window)
+            # label = self.read_label(
+            #     label_path=self.label_path,
+            #     window=window)
             with rasterio.open(self.label_path, 'r') as label_file:
                 label = label_file.read(window=window, out_dtype=np.float32)
-                if self.interpolation : 
-                    label = downsample_image(label[0], 8)
+
             # converts label crop into contiguous tensor
             label = torch.from_numpy(label).float().contiguous()
-            mask = label >= 13
-            label[mask] = 13
-            multi_labels = label.float()
-            multi_labels -= 1
-            final_label = multi_labels
+            # label = torch.where((label >= 13), 13, label)
+            # Remap labels to classes 1-9 (ensuring in-place operations)
+            label = torch.where((label == 1) | (label == 18), 1, label)  # Map 1 and 18 to 1
+            label = torch.where(label == 2, 2, label)  # Map 2 to 2
+            label = torch.where(label == 3, 3, label)  # Map 3 to 3
+            label = torch.where((label == 4) | (label == 14), 4, label)  # Map 4 and 14 to 4
+            label = torch.where((label == 5) | (label == 13), 5, label)  # Map 5 and 13 to 5
+            label = torch.where((label == 6) | (label == 7) | (label == 16) | (label == 17), 6,
+                                label)  # Map 6, 7, 16, 17 to 6
+            label = torch.where((label == 8) | (label == 15), 7, label)  # Map 8 and 15 to 7
+            label = torch.where((label == 9) | (label == 11) | (label == 12), 8, label)  # Map 9, 11, 12 to 8
+            label = torch.where(label == 10, 9, label)  # Map 10 to 9
+            label = torch.where(label == 19, 10, label)
+            # After remapping, subtract 1 to bring the labels into 0-8 range
+            multi_labels = label.float() - 1
 
+            # Ensure that no labels are out of bounds
+            # multi_labels = torch.clamp(multi_labels, min=0, max=8)  # Make sure the range is 0-8
+            # assert torch.min(multi_labels) >= 0 and torch.max(multi_labels) <= 9, \
+            #     f"Label out of bounds: min={torch.min(multi_labels)}, max={torch.max(multi_labels)}"
         if self.img_aug is not None:            
-            final_image, final_mask = self.img_aug(img=image, label=final_label)
+            final_image, final_mask = self.img_aug(img=image, label=multi_labels)
+
         else:
-            final_image, final_mask = image, final_label
+            final_image, final_mask = image, multi_labels
         return {'orig_image':image,
                 'orig_mask': label,
                 'id' : domain_pattern,

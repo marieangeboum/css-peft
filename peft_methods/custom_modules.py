@@ -127,26 +127,21 @@ class Block(nn.Module):
                                     adapter_layernorm_option=config.ffn_adapter_layernorm_option,
                                     ) for i in range(self.nb_task)])
 
-    def forward(self, x, mask = None, return_attention = False):
+    def forward(self, x, task_id, mask = None, return_attention = False):
         y,  attn = self.attn(self.norm1(x))
         if return_attention:
             return attn
-        
         x = x + self.drop_path(y)
         if self.config.ffn_adapt and self.config.ffn_option == 'parallel':
-            adapt_x = self.adaptmlp_pool[self.task_id](x, add_residual=False)
-
+            adapt_x = self.adaptmlp_pool[task_id](x, add_residual=False)
         residual = x
-        
         x = self.drop_path(self.mlp(self.norm2(x)))
-
         if self.config.ffn_adapt:
             if self.config.ffn_option == 'sequential':
-                x = self.adaptmlp_pool[self.task_id](x)
+                x = self.adaptmlp_pool[task_id](x)
             elif self.config.ffn_option == 'parallel':
                 x = x + adapt_x
             else:
                 raise ValueError(self.config.ffn_adapt)
-
         x = residual + x
         return x

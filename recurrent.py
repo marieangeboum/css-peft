@@ -3,7 +3,8 @@ import neptune # type: ignore
 import datetime
 from torchmetrics import Accuracy # type: ignore
 from configs.utils import *
-from datasets.utils import *
+from datasets.utils_continual import *
+from datasets.utils import  create_val_dataloader, create_train_dataloader, train_function, validation_function
 from easydict import EasyDict # type: ignore
 from argparse import ArgumentParser
 from torch.optim import SGD, Adam # type: ignore
@@ -48,7 +49,7 @@ def main():
     parser.add_argument("--replay", action="store_true", help="Enable replay")
     parser.add_argument('--config_file', type = str, 
                         default = "/d/maboum/css-peft/configs/config.yml")
-    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/checkpoint{}.pth",
+    parser.add_argument('--checkpoint_file', type=str, default="/scratcht/FLAIR_1/experiments/checkpoints/vit-adapter/recurrentKD{}.pth",
                         help="Checkpoint file to resume training")
     parser.add_argument('--ffn_adapt', default=True, action='store_true', help='whether activate AdaptFormer')
     parser.add_argument('--ffn_num', default=64, type=int, help='bottleneck middle dimension')
@@ -117,9 +118,7 @@ def main():
         nb_task = len(data_sequence),
         tasks = data_sequence, 
         decoder = args.decoder) 
-    
     test_dataloaders = []
-    
     run = neptune.init_run(
                 project="continual-semantic-segmentation/peft-methods",
                 api_token=api_token,
@@ -140,10 +139,6 @@ def main():
         random.shuffle(domain_img_val)
         train_loader = create_train_dataloader(domain_img_train, args, data_config, binary= binary)
         val_loader = create_val_dataloader(domain_img_val, args, data_config)
-
-        # test_dataloader = create_test_dataloader(test_imgs, args, data_config, binary= binary)
-            
-
         # Model Definition
         segmentation_model_path = os.path.join(config["checkpoints"],args.sequence_path.format(seed),
                                     '{}_{}'.format(args.strategy.format(train_type),seed))
@@ -151,8 +146,7 @@ def main():
         segmentation_model = SegmenterAdapt(im_size, n_layers, d_model, d_encoder, 4 * d_model, n_heads, n_class,
                                                 patch_size, selected_model, tuning_config=tuning_config,
                                                 model_name=config["model_name"], id = step).to(device)
-
-        segmentation_model.load_pretrained_weights()
+        segmentation_model.load_pretrained_weights(model_path="/scratcht/FLAIR_1/experiments/checkpoints/pretrain9_adaptmlp_4563")
         
         num_params = sum(p.numel() for p in segmentation_model.parameters() if p.requires_grad)
         print(f"training strategy: {train_type}\n\n")
@@ -170,17 +164,15 @@ def main():
 
         # Callbacks
         early_stopping = EarlyStopping(patience=40, verbose=True, delta_loss=0.001, delta_iou=0.001,path=segmentation_model_path)
-        optimizer = SGD(segmentation_model.parameters(),
+        optimizer = SGD(segmentation_model.parameters(), 
                         lr=args.initial_lr,
                         momentum=0.9)
         scheduler = LambdaLR(optimizer,lr_lambda= lambda_lr, verbose = True)
         loss_fn = torch.nn.CrossEntropyLoss(weight = torch.tensor(all_weights).float()).cuda()
-        #loss_fn = torch.nn.CrossEntropyLoss().cuda()
         accuracy = Accuracy(task='multiclass',num_classes=n_class).cuda()
 
         # Check if a checkpoint exists and load it
         checkpoint = load_checkpoint(args.checkpoint_file.format(step))
-
         if checkpoint:
             start_epoch = checkpoint['epoch']+1
             segmentation_model.load_state_dict(checkpoint['model_state_dict'])
@@ -190,18 +182,27 @@ def main():
         else:
             start_epoch = 1
 
-        for epoch in range(start_epoch,args.max_epochs):
-            time_ep = time.time()
-            segmentation_model, train_acc, train_loss = train_function(segmentation_model,train_loader, 
-                                                                        device,optimizer, loss_fn,
-                                                                        accuracy,epoch, data_config, run)
-            print(train_acc, train_loss)
-            scheduler.step()
-            segmentation_model, val_loss, val_acc, val_iou = validation_function(segmentation_model,val_loader, 
-                                                                                device,loss_fn,
-                                                                                accuracy, epoch, data_config, run, eval_freq=50)
-            
-            print(val_acc, val_loss, val_iou)
+        for epoch in range(start_epoch,args.max_epochs+1):
+            if step == 0 :
+                segmentation_model, train_acc, train_loss = train_function(segmentation_model, train_loader,device,
+                                                                                      optimizer, loss_fn, accuracy, epoch,
+                                                                                      data_config, run)
+                print(train_acc, train_loss)
+                scheduler.step()
+                segmentation_model, val_loss, val_acc, val_iou = validation_function(segmentation_model, val_loader, device,
+                                                                                     loss_fn, accuracy, epoch, data_config, run,
+                                                                                     eval_freq=50)
+                print(val_acc, val_loss, val_iou)
+            else :
+                segmentation_model, train_acc, train_loss = train_function_recurrent(segmentation_model,train_loader,
+                                                                            device,optimizer, loss_fn, accuracy,epoch, data_config, run,
+                                                                            soft_target_loss_weight=.25, ce_loss_weight=.75,step)
+                print(train_acc, train_loss)
+                scheduler.step()
+                segmentation_model, val_loss, val_acc, val_iou = validation_function_recurrent(segmentation_model, val_loader, device, loss_fn,
+                                                                                               accuracy, epoch, data_config, run, eval_freq=50)
+                print(val_acc, val_loss, val_iou)
+
             save_checkpoint({
                 'epoch': epoch,
                 'model_state_dict': segmentation_model.state_dict(),
@@ -213,13 +214,10 @@ def main():
                 'train_acc': train_acc,
                 'val_acc': val_acc,
                 'val_iou': val_iou
-            },  filename=args.checkpoint_file.format(step))
-
+            }, filename=args.checkpoint_file.format(step))
             early_stopping(val_loss,val_iou, segmentation_model)
             if early_stopping.early_stop:
                 break
-            time_ep = time.time() - time_ep
+
         segmentation_model.increment()
-    # segmentation_model,val_metrics = test_function(segmentation_model,test_dataloader, device, accuracy,
-    #                                      eval_freq, data_config, "SUP", "0")
     run.stop()

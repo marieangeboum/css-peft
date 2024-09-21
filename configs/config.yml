@@ -12,7 +12,7 @@ dataset:
   flair1:
     batch_size: 8
     binary: false
-    class_weights_13:
+    class_weights:
       0: 8.23,
       1: 8.07,
       2: 13.98,
@@ -25,15 +25,19 @@ dataset:
       9: 18.72,
       10: 10.16,
       11: 3.55,
-      12: 0
-    class_weights_binary:
-      0:
-      - 91.77
-      - no building
-      1:
-      - 8.23
-      - building
-    classnames:
+      12: 0.57
+    class_weights:
+      0: 8.23,
+      1: 8.07,
+      2: 13.98,
+      3: 3.65,
+      4: 5.10,
+      5: 17.75,
+      6: 6.94
+      7: 16.99
+      8: 18.72
+      9: 0.57
+    classnames_:
       0: building
       1: pervious surface
       2: impervious surface
@@ -47,11 +51,17 @@ dataset:
       10: agricultural land
       11: plowed land
       12: other
-    classnames_3:
+    classnames:
       0: building
       1: pervious surface
       2: impervious surface
-      4: other
+      3: natural soil
+      4: water
+      5: trees
+      6: brushwood
+      7: agricultural land
+      8: herbaceous vegetation
+      9: other
     classnames_binary:
       0: no building
       1: building
@@ -86,7 +96,7 @@ dataset:
     learning_rate: 0.01
     metadata: /scratcht/FLAIR_1/flair-one_classif_metadata.json
     n_channels: 3
-    n_cls: 13
+    n_cls: 10
     norm_task:
       norm_means:
       - 105.08

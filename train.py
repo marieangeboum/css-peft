@@ -189,7 +189,6 @@ def main():
 
         # Check if a checkpoint exists and load it
         checkpoint = load_checkpoint(args.checkpoint_file.format(step))
-
         if checkpoint:
             start_epoch = checkpoint['epoch']
             segmentation_model.load_state_dict(checkpoint['model_state_dict'])
@@ -198,9 +197,8 @@ def main():
             early_stopping.load_state(checkpoint['early_stopping_state_dict'])
         else:
             start_epoch = 1
-
         for epoch in range(start_epoch,args.max_epochs):
-            time_ep = time.time()
+
             segmentation_model, train_acc, train_loss = train_function(segmentation_model,train_loader, 
                                                                         device,optimizer, loss_fn,
                                                                         accuracy,epoch, data_config, run)
@@ -209,7 +207,6 @@ def main():
             segmentation_model, val_loss, val_acc, val_iou = validation_function(segmentation_model,val_loader, 
                                                                                 device,loss_fn,
                                                                                 accuracy, epoch, data_config, run)
-            
             print(val_acc, val_loss, val_iou)
             save_checkpoint({
                 'epoch': epoch,
@@ -223,14 +220,11 @@ def main():
                 'val_acc': val_acc,
                 'val_iou': val_iou
             }, filename=args.checkpoint_file.format(step))
-
             early_stopping(val_loss,val_iou, segmentation_model)
             if early_stopping.early_stop:
                 break
-            time_ep = time.time() - time_ep
+
         segmentation_model.increment()
-        # segmentation_model,val_metrics = test_function(segmentation_model,test_dataloader, device, accuracy,
-        #                                      eval_freq, data_config, "SUP", "0")
         run.stop()
 if __name__ == "__main__":
     main()

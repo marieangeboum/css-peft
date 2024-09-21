@@ -63,7 +63,7 @@ class SegmenterAdapt(nn.Module):
                 drop_path_rate=0.0,
                 distilled=False,
                 channels=3, 
-                task_id= self.id
+                task_id=self.id
             )
         if self.tuning_config.decoder == 'linear': 
             self.decoder_pool = nn.ModuleList([DecoderLinear(n_cls, patch_size, d_model) 
@@ -72,7 +72,7 @@ class SegmenterAdapt(nn.Module):
             self.decoder_pool = nn.ModuleList([MaskTransformer(n_cls, patch_size, d_encoder, n_layers,
                                             n_heads, d_model, d_ff, drop_path_rate=0.0, dropout = 0.1) 
                                             for i in range(self.tuning_config.nb_task)])
-
+    
     @torch.jit.ignore
     def no_weight_decay(self):
         def append_prefix_no_weight_decay(prefix, module):
@@ -101,15 +101,15 @@ class SegmenterAdapt(nn.Module):
     def increment(self):
         self.id += 1
 
-    def forward(self, im):
+    def forward(self, im, id):
         H_ori, W_ori = im.size(2), im.size(3)
         im = padding(im, self.patch_size)
         H, W = im.size(2), im.size(3)
-        x = self.encoder(im)
+        x = self.encoder(im, task_id=id)
         # remove CLS/DIST tokens for decoding
         num_extra_tokens = 1 + self.encoder.distilled
         x = x[:, num_extra_tokens:]
-        masks = self.decoder_pool[self.id](x, (H, W))
+        masks = self.decoder_pool[id](x, (H, W))
         masks = F.interpolate(masks, size=(H, W), mode="bilinear")
         masks = unpadding(masks, (H_ori, W_ori))
 

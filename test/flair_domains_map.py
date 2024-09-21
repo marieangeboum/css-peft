@@ -103,4 +103,6 @@ folium.GeoJson(gdf,
                                   aliases=["Département: ", "Code: ", "Year: "],
                                   parse_html=True)).add_to(m)
 m.save("french_departments_map.html")
-m
+mif code in list(map(str, departments)) and code not in highlight_departments:
+    return {'fillColor': 'green', 'color': 'black', 'weight': 1, 'fillOpacity': 0.5}
+elif code not in list(map(str, departments)):

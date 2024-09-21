@@ -115,7 +115,7 @@ class VisionTransformerAdapt(nn.Module):
     def load_pretrained(self, checkpoint_path, prefix=""):
         _load_weights(self, checkpoint_path, prefix)
 
-    def forward(self, im, return_features=True):
+    def forward(self, im, task_id,return_features=True):
         B, _, H, W = im.shape
         PS = self.patch_size
 
@@ -143,7 +143,7 @@ class VisionTransformerAdapt(nn.Module):
             if self.tuning_config and self.tuning_config.vpt_on:
                 eee = self.embeddings[idx].expand(B, -1, -1)
                 x = torch.cat([eee, x], dim=1)
-            x = blk(x)
+            x = blk(x, task_id = task_id)
             if self.tuning_config and self.tuning_config.vpt_on:
                 x = x[:, self.tuning_config.vpt_num:, :]
         x = self.norm(x)
@@ -193,6 +193,6 @@ class VisionTransformerAdapt(nn.Module):
                 if self.tuning_config and self.tuning_config.vpt_on:
                     eee = self.embeddings[idx].expand(B, -1, -1)
                     x = torch.cat([eee, x], dim=1)
-                x = blk(x)
+                x = blk(x, task_id = self.task_id)
             else:
                 return blk(x, return_attention=True)
